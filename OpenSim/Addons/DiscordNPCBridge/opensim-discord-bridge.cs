@@ -14,13 +14,10 @@ using Discord;
 using Discord.WebSocket;
 using System.Linq;
 
-[assembly: Addin("DiscordNPCBridge", "0.1")]
-[assembly: AddinDependency("OpenSim.Region.Framework", "0.5")]
-
-namespace DiscordNPCBridge
+namespace OpenSim.DiscordNPCBridge
 {
-    [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "DiscordNPCBridge")]
-    public class DiscordNPCBridge : ISharedRegionModule
+    [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "DiscordNPCBridgeConnectorModule")]
+    public class DiscordNPCBridgeModule : ISharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         
