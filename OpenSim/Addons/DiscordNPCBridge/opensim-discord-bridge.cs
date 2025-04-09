@@ -12,6 +12,7 @@ using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using Discord;
 using Discord.WebSocket;
+using System.Linq;
 
 [assembly: Addin("DiscordNPCBridge", "0.1")]
 [assembly: AddinDependency("OpenSim.Region.Framework", "0.5")]
@@ -64,7 +65,7 @@ namespace DiscordNPCBridge
                 return;
                 
             m_DiscordToken = config.GetString("DiscordToken", "");
-            m_DiscordChannelId = config.GetULong("DiscordChannelId", 0);
+            m_DiscordChannelId = (ulong)config.GetLong("DiscordChannelId", 0);
             m_NPCFirstName = config.GetString("NPCFirstName", "Discord");
             m_NPCLastName = config.GetString("NPCLastName", "Bridge");
             
@@ -240,7 +241,7 @@ namespace DiscordNPCBridge
                 if (m_NPCScenes.TryGetValue(npcId, out Scene scene))
                 {
                     INPCModule npcModule = m_NPCModules[npcId];
-                    npcModule.Say(npcId, discordMessage, ChatTypeEnum.Say, scene);
+                    npcModule.Say(npcId, scene, discordMessage);
                 }
             }
         }
@@ -353,21 +354,22 @@ namespace DiscordNPCBridge
             
             try
             {
+                AvatarAppearance avatarAppearance = new AvatarAppearance();
+
                 m_NPCUUID = npcModule.CreateNPC(m_NPCFirstName, 
                                                m_NPCLastName, 
                                                m_NPCPosition,
                                                UUID.Zero, // Owner ID
                                                true,      // Set as AI
-                                               scene,
-                                               AvatarAppearance.DEFAULT);
+                                               scene, avatarAppearance);
                                                
                 m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID}");
                 
                 m_NPCModules[m_NPCUUID] = npcModule;
                 m_NPCScenes[m_NPCUUID] = scene;
-                
+
                 // Say hello
-                npcModule.Say(m_NPCUUID, "Discord Bridge NPC activated. I'm relaying messages between OpenSim and Discord.", ChatTypeEnum.Say, scene);
+                npcModule.Say(m_NPCUUID, scene, "Discord Bridge NPC activated. I'm relaying messages between OpenSim and Discord.");
             }
             catch (Exception ex)
             {
@@ -395,7 +397,7 @@ namespace DiscordNPCBridge
                 if (m_NPCScenes.TryGetValue(npcId, out Scene scene))
                 {
                     INPCModule npcModule = m_NPCModules[npcId];
-                    success = npcModule.SitObject(npcId, targetId, scene);
+                    success = npcModule.Sit(npcId, targetId, scene);
                 }
             }
             return success;
@@ -408,7 +410,7 @@ namespace DiscordNPCBridge
                 if (m_NPCScenes.TryGetValue(npcId, out Scene scene))
                 {
                     INPCModule npcModule = m_NPCModules[npcId];
-                    npcModule.StandUp(npcId, scene);
+                    npcModule.Stand(npcId, scene);
                 }
             }
         }
@@ -525,17 +527,17 @@ namespace DiscordNPCBridge
         
         #region Chat Handling
         
-        private void OnChatFromClient(Object sender, OSChatMessage chat)
+        private void OnChatFromClient(Object sender2, OSChatMessage chat)
         {
             if (!m_Enabled)
                 return;
                 
             // Ignore chat from the NPC itself
-            if (chat.Sender.IsEqualTo(m_NPCUUID))
+            if (chat.Sender.Equals(m_NPCUUID))
                 return;
                 
             // Check if the chat source is within range of the NPC
-            Scene scene = (Scene)sender;
+            Scene scene = (Scene)sender2;
             ScenePresence npcPresence = null;
             
             foreach (UUID npcId in m_NPCModules.Keys)
@@ -550,8 +552,8 @@ namespace DiscordNPCBridge
             if (npcPresence == null)
                 return;
                 
-            // Get the chat sender
-            ScenePresence sender = scene.GetScenePresence(chat.Sender);
+            // Get the chat sender2
+            ScenePresence sender = scene.GetScenePresence(chat.SenderUUID);
             if (sender == null)
                 return;
                 
@@ -574,7 +576,7 @@ namespace DiscordNPCBridge
                 return;
                 
             // Ignore chat from the NPC itself
-            if (chat.Sender.IsEqualTo(m_NPCUUID))
+            if (chat.Sender.Equals(m_NPCUUID))
                 return;
                 
             // Only process object chat
