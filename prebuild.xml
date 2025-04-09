@@ -1948,6 +1948,46 @@
       </Files>
     </Project>
 
+    <Project name="OpenSim.Addons.DiscordNPCBridge" path="OpenSim/Addons/DiscordNPCBridge" type="Library">
+      <Configuration name="Debug">
+        <Options>
+          <OutputPath>../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+      <Configuration name="Release">
+        <Options>
+          <OutputPath>../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+
+      <ReferencePath>../../../bin/</ReferencePath>
+
+      <Reference name="Nini"/>
+      <Reference name="Mono.Addins"/>
+      <Reference name="MySql.Data"/>
+      <Reference name="log4net"/>
+      <Reference name="OpenMetaverse"/>
+      <Reference name="OpenMetaverseTypes"/>
+
+      <Reference name="OpenSim.Framework"/>
+      <Reference name="OpenSim.Data"/>
+      <Reference name="OpenSim.Data.MySQL"/>
+      <Reference name="OpenSim.Framework.Servers.HttpServer"/>
+      <Reference name="OpenSim.Services.Base"/>
+      <Reference name="OpenSim.Services.Interfaces"/>
+      <Reference name="OpenSim.Region.Framework"/>
+      <Reference name="OpenSim.Server.Base"/>
+      <Reference name="OpenSim.Server.Handlers"/>
+
+      <Files>
+        <Match pattern="*.cs" recurse="true">
+          <Exclude name="obj" pattern="obj"/>
+          <Exclude pattern="Tests" />
+        </Match>
+        <Match buildAction="EmbeddedResource" path="Resources" pattern="*.migrations"/>
+      </Files>
+    </Project>
+
     <Project name="OpenSim.Addons.Groups" path="OpenSim/Addons/Groups" type="Library">
       <Configuration name="Debug">
         <Options>

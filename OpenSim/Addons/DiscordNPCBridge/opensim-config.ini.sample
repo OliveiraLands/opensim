@@ -1,0 +1,21 @@
+[DiscordNPCBridge]
+    ;; Enable or disable the Discord NPC Bridge module
+    Enabled = true
+    
+    ;; Discord bot token (obtenha em https://discord.com/developers/applications)
+    DiscordToken = "SEU_TOKEN_AQUI"
+    
+    ;; ID do canal Discord para integração
+    DiscordChannelId = 123456789012345678
+    
+    ;; Nome do NPC
+    NPCFirstName = "Discord"
+    NPCLastName = "Bridge"
+    
+    ;; Posição inicial do NPC (coordenadas X, Y, Z)
+    NPCX = 128
+    NPCY = 128
+    NPCZ = 25
+    
+    ;; Raio de escuta do NPC (em metros)
+    ListenRadius = 15.0
