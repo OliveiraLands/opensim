@@ -1968,7 +1968,10 @@
       <Reference name="log4net"/>
       <Reference name="OpenMetaverse"/>
       <Reference name="OpenMetaverseTypes"/>
-
+	  <Reference name="Discord.Net.Core"/>
+	  <Reference name="Discord.Net.Rest"/>
+	  <Reference name="Discord.Net.WebSocket"/>
+	  
       <Reference name="OpenSim.Framework"/>
       <Reference name="OpenSim.Data"/>
       <Reference name="OpenSim.Data.MySQL"/>
