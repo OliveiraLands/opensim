@@ -16,7 +16,7 @@ using System.Linq;
 
 namespace OpenSim.DiscordNPCBridge
 {
-    [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "DiscordNPCBridgeConnectorModule")]
+    [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "DiscordNPCBridgeModule")]
     public class DiscordNPCBridgeModule : ISharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
