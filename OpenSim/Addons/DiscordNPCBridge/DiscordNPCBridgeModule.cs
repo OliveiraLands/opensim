@@ -13,6 +13,7 @@ using OpenSim.Region.Framework.Scenes;
 using Discord;
 using Discord.WebSocket;
 using System.Linq;
+using OpenSim.Services.Interfaces;
 
 namespace OpenSim.DiscordNPCBridge
 {
@@ -356,14 +357,26 @@ namespace OpenSim.DiscordNPCBridge
             
             try
             {
-                AvatarAppearance avatarAppearance = new AvatarAppearance();
+                m_log.Info("[DiscordNPCBridge]: NPC module found. Creating NPC.");
+
+                UUID ownerId = scene.RegionInfo.EstateSettings.EstateOwner;
+                IAvatarService avatarService = scene.RequestModuleInterface<IAvatarService>();
+                AvatarAppearance appearance = null;
+                if (avatarService != null)
+                {
+                    appearance = avatarService.GetAppearance(ownerId);
+                }
+                else
+                {
+                    appearance = new AvatarAppearance();
+                }
 
                 m_NPCUUID = npcModule.CreateNPC(m_NPCFirstName, 
                                                m_NPCLastName, 
                                                m_NPCPosition,
                                                UUID.Zero, // Owner ID
                                                true,      // Set as AI
-                                               scene, avatarAppearance);
+                                               scene, appearance);
                                                
                 m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID}");
                 
