@@ -20,7 +20,7 @@ namespace OpenSim.DiscordNPCBridge
     public class DiscordNPCBridgeModule : ISharedRegionModule
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        
+
         private bool m_Enabled = false;
         private List<Scene> m_Scenes = new List<Scene>();
         private IConfig m_Config;
@@ -39,9 +39,12 @@ namespace OpenSim.DiscordNPCBridge
         private Dictionary<UUID, INPCModule> m_NPCModules = new Dictionary<UUID, INPCModule>();
         private Dictionary<UUID, Scene> m_NPCScenes = new Dictionary<UUID, Scene>();
         private Timer m_ScanTimer;
-        
+
+        private EventManager.ChatFromClientEvent m_OnChatFromClientHandler;
+
+
         #region ISharedRegionModule Interface
-        
+
         public string Name => "DiscordNPCBridge";
         
         public Type ReplaceableInterface => null;
@@ -98,8 +101,10 @@ namespace OpenSim.DiscordNPCBridge
                 m_log.Error("[DiscordNPCBridge]: NPC module not found. Cannot continue.");
                 return;
             }
-            
-            scene.EventManager.OnChatFromClient += OnChatFromClient;
+
+            m_OnChatFromClientHandler = (s, chat) => OnChatFromClient(scene, chat);
+            scene.EventManager.OnChatFromClient += m_OnChatFromClientHandler;
+
             scene.EventManager.OnChatFromWorld += OnChatFromWorld;
         }
         
@@ -110,7 +115,7 @@ namespace OpenSim.DiscordNPCBridge
                 
             if (m_Scenes.Contains(scene))
             {
-                scene.EventManager.OnChatFromClient -= OnChatFromClient;
+                scene.EventManager.OnChatFromClient -= m_OnChatFromClientHandler;
                 scene.EventManager.OnChatFromWorld -= OnChatFromWorld;
                 
                 if (m_NPCScenes.ContainsValue(scene))
@@ -524,7 +529,7 @@ namespace OpenSim.DiscordNPCBridge
         
         #region Chat Handling
         
-        private void OnChatFromClient(Object sender2, OSChatMessage chat)
+        private void OnChatFromClient(Scene sender, OSChatMessage chat)
         {
             if (!m_Enabled)
                 return;
@@ -534,7 +539,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
                 
             // Check if the chat source is within range of the NPC
-            Scene scene = (Scene)sender2;
+            Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
             
             foreach (UUID npcId in m_NPCModules.Keys)
@@ -549,19 +554,19 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
                 
-            // Get the chat sender2
-            ScenePresence sender = scene.GetScenePresence(chat.SenderUUID);
-            if (sender == null)
+            // Get the chat senderPresence
+            ScenePresence senderPresence = scene.GetScenePresence(chat.SenderUUID);
+            if (senderPresence == null)
                 return;
                 
             // Check if within range
-            if (Vector3.Distance(npcPresence.AbsolutePosition, sender.AbsolutePosition) > m_ListenRadius)
+            if (Vector3.Distance(npcPresence.AbsolutePosition, senderPresence.AbsolutePosition) > m_ListenRadius)
                 return;
                 
             // Only relay public chat or whispers to the NPC
             if (chat.Type == ChatTypeEnum.Say || chat.Type == ChatTypeEnum.Whisper)
             {
-                string message = $"{sender.Name}: {chat.Message}";
+                string message = $"{senderPresence.Name}: {chat.Message}";
                 _ = SendDiscordMessage(message);
             }
         }
