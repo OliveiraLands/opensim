@@ -156,6 +156,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_String llGetInventoryName(int type, int number);
        LSL_Integer llGetInventoryNumber(int type);
        LSL_Integer llGetInventoryPermMask(string item, int mask);
+        LSL_String llGetInventoryDesc(string name);
        LSL_Integer llGetInventoryType(string name);
            LSL_Key llGetKey();
            LSL_Key llGetLandOwnerAt(LSL_Vector pos);
@@ -329,6 +330,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llRequestPermissions(string agent, int perm);
            LSL_Key llRequestSecureURL();
            LSL_Key llRequestSimulatorData(string simulator, int data);
+         LSL_Float llGetSimStats(LSL_Integer stat_type);
            LSL_Key llRequestURL();
               void llResetLandBanList();
               void llResetLandPassList();
@@ -371,6 +373,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llSetColor(LSL_Vector color, int face);
               void llSetContentType(LSL_Key id, LSL_Integer type);
               void llSetDamage(double damage);
+        LSL_Float llGetHealth(LSL_String key);
               void llSetForce(LSL_Vector force, int local);
               void llSetForceAndTorque(LSL_Vector force, LSL_Vector torque, int local);
               void llSetVelocity(LSL_Vector vel, int local);
@@ -528,6 +531,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
          LSL_String llGetStartString();
         LSL_Integer llGetLinkSitFlags(LSL_Integer linknum);
                void llSetLinkSitFlags(LSL_Integer linknum, LSL_Integer flags);
-
+         LSL_String llHMAC(LSL_String private_key, LSL_String message, LSL_String algo);
     }
 }
