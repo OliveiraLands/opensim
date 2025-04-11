@@ -1687,45 +1687,44 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if(!UUID.TryParse(reqid, out UUID id) || id.IsZero())
                 return;
 
-            // Make sure the content type is text/plain to start with
-            m_UrlModule.HttpContentType(id, "text/plain");
-
-            // Is the object owner online and in the region
-            ScenePresence agent = World.GetScenePresence(m_host.ParentGroup.OwnerID);
-            if (agent == null || agent.IsChildAgent || agent.IsDeleted)
-                return;  // Fail if the owner is not in the same region
-
-            // Is it the embeded browser?
-            string userAgent = m_UrlModule.GetHttpHeader(id, "user-agent");
-            if(string.IsNullOrEmpty(userAgent))
-                return;
-
-            if (userAgent.IndexOf("SecondLife") < 0)
-                return; // Not the embedded browser
-
-            // Use the IP address of the client and check against the request
-            // seperate logins from the same IP will allow all of them to get non-text/plain as long
-            // as the owner is in the region. Same as SL!
-            string logonFromIPAddress = agent.ControllingClient.RemoteEndPoint.Address.ToString();
-            if (string.IsNullOrEmpty(logonFromIPAddress))
-                return;
-
-            string requestFromIPAddress = m_UrlModule.GetHttpHeader(id, "x-remote-ip");
-            //m_log.Debug("IP from header='" + requestFromIPAddress + "' IP from endpoint='" + logonFromIPAddress + "'");
-            if (requestFromIPAddress == null)
-                return;
-
-            requestFromIPAddress = requestFromIPAddress.Trim();
-
-            // If the request isnt from the same IP address then the request cannot be from the owner
-            if (!requestFromIPAddress.Equals(logonFromIPAddress))
-                return;
-
             switch (type)
             {
                 case ScriptBaseClass.CONTENT_TYPE_HTML:
+                {
+                    // Make sure the content type is text/plain to start with
+                    m_UrlModule.HttpContentType(id, "text/plain");
+
+                    // Is the object owner online and in the region
+                    ScenePresence agent = World.GetScenePresence(m_host.ParentGroup.OwnerID);
+                    if (agent == null || agent.IsChildAgent || agent.IsDeleted)
+                        return;  // Fail if the owner is not in the same region
+
+                    // Is it the embeded browser?
+                    string userAgent = m_UrlModule.GetHttpHeader(id, "user-agent");
+                    if(string.IsNullOrEmpty(userAgent) || userAgent.IndexOf("SecondLife") < 0)
+                        return; // Not the embedded browser
+
+                    // Use the IP address of the client and check against the request
+                    // seperate logins from the same IP will allow all of them to get non-text/plain as long
+                    // as the owner is in the region. Same as SL!
+                    string logonFromIPAddress = agent.ControllingClient.RemoteEndPoint.Address.ToString();
+                    if (string.IsNullOrEmpty(logonFromIPAddress))
+                        return;
+
+                    string requestFromIPAddress = m_UrlModule.GetHttpHeader(id, "x-remote-ip");
+                    //m_log.Debug("IP from header='" + requestFromIPAddress + "' IP from endpoint='" + logonFromIPAddress + "'");
+                    if (requestFromIPAddress == null)
+                        return;
+
+                    requestFromIPAddress = requestFromIPAddress.Trim();
+
+                    // If the request isnt from the same IP address then the request cannot be from the owner
+                    if (!requestFromIPAddress.Equals(logonFromIPAddress))
+                        return;
+
                     m_UrlModule.HttpContentType(id, "text/html");
                     break;
+                }
                 case ScriptBaseClass.CONTENT_TYPE_XML:
                     m_UrlModule.HttpContentType(id, "application/xml");
                     break;
@@ -5272,6 +5271,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             m_host.ParentGroup.Damage = (float)damage;
         }
 
+        public LSL_Float llGetHealth(LSL_String key)
+        {
+            if (UUID.TryParse(key, out UUID agent))
+            {
+                ScenePresence user = World.GetScenePresence(agent);
+                if (user is not null)
+                    return user.Health;
+            }
+            return new LSL_Float(-1.0);
+        }
+
         public void llTeleportAgentHome(string agent)
         {
             if (UUID.TryParse(agent, out UUID agentId) && agentId.IsNotZero())
@@ -6493,105 +6503,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         }
 
-        private static bool ListFind_areEqual(object l, object r)
-        {
-            if (l is null || r is null)
-                return false;
-
-            if (l is LSL_Integer lli)
-            {
-                if (r is LSL_Integer rli)
-                    return lli.value == rli.value;
-                if (r is int ri)
-                    return lli.value == ri;
-                return false;
-            }
-
-            if (l is int li)
-            {
-                if (r is LSL_Integer rli)
-                    return li == rli.value;
-                if (r is int ri)
-                    return li == ri;
-                return false;
-            }
-
-            if (l is LSL_Float llf)
-            {
-                if (r is LSL_Float rlf)
-                    return llf.value == rlf.value;
-                if (r is float rf)
-                    return llf.value == (double)rf;
-                if (r is double rd)
-                    return llf.value == rd;
-                return false;
-            }
-            if (l is double ld)
-            {
-                if (r is LSL_Float rlf)
-                    return ld == rlf.value;
-                if (r is float rf)
-                    return ld == (double)rf;
-                if (r is double rd)
-                    return ld == rd;
-                return false;
-            }
-            if (l is float lf)
-            {
-                if (r is LSL_Float rlf)
-                    return lf == (float)rlf.value;
-                if (r is float rf)
-                    return lf == rf;
-                if (r is double rd)
-                    return lf == (float)rd;
-                return false;
-            }
-
-            if (l is LSL_String lls)
-            {
-                if (r is LSL_String rls)
-                    return lls.m_string.Equals(rls.m_string, StringComparison.Ordinal);
-                if (r is string rs)
-                    return lls.m_string.Equals(rs, StringComparison.Ordinal);
-                return false;
-            }
-
-            if (l is string ls)
-            {
-                if (r is LSL_String rls)
-                    return ls.Equals(rls.m_string, StringComparison.Ordinal);
-                if (r is string rs)
-                    return ls.Equals(rs, StringComparison.Ordinal);
-                if (r is LSL_Key rlk)
-                    return ls.Equals(rlk.m_string, StringComparison.OrdinalIgnoreCase);
-                return false;
-            }
-
-            if(l is LSL_Key llk)
-            {
-                if (r is LSL_Key rlk)
-                    return llk.m_string.Equals(rlk.m_string, StringComparison.OrdinalIgnoreCase);
-                if (r is string rk)
-                    return llk.m_string.Equals(rk, StringComparison.OrdinalIgnoreCase);
-            }
-
-            if (l is LSL_Vector llv)
-            {
-                if(r is LSL_Vector rlv)
-                    return llv.Equals(rlv);
-                return false;
-            }
-
-            if (l is LSL_Rotation llr)
-            {
-                if(r is LSL_Rotation rlr)
-                    return llr.Equals(rlr);
-                return false;
-            }
-
-            return false;
-        }
-
         /// <summary>
         /// Returns the index of the first occurrence of test
         /// in src.
@@ -6614,13 +6525,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             object test0 = test[0];
             for (int i = 0; i <= src.Length - test.Length; i++)
             {
-                if (ListFind_areEqual(test0, src[i]))
+                if (LSL_List.ListFind_areEqual(test0, src[i]))
                 {
                     int k = i + 1;
                     int j = 1;
                     while(j < test.Length)
                     {
-                        if (!ListFind_areEqual(test[j], src[k]))
+                        if (!LSL_List.ListFind_areEqual(test[j], src[k]))
                             break;
                         ++j;
                         ++k;
@@ -6670,13 +6581,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             object test0 = test[0];
             for (int i = start; i <= end; i += stride)
             {
-                if (ListFind_areEqual(test0, src[i]))
+                if (LSL_List.ListFind_areEqual(test0, src[i]))
                 {
                     int k = i + 1;
                     int j = 1;
                     while (j < test.Length)
                     {
-                        if (!ListFind_areEqual(test[j], src[k]))
+                        if (!LSL_List.ListFind_areEqual(test[j], src[k]))
                             break;
                         ++j;
                         ++k;
@@ -8494,6 +8405,57 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public LSL_String llSHA1String(string src)
         {
             return Util.SHA1Hash(src, Encoding.UTF8).ToLower();
+        }
+
+        public LSL_String llHMAC(LSL_String private_key, LSL_String message, LSL_String algo)
+        {
+            if (private_key.Length < 1 || message.Length < 1)
+                return new LSL_String();
+            
+            try
+            {
+                HMAC hasher;
+                switch (algo)
+                {
+                    case "md5":
+                        hasher = new HMACMD5(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    case "sha1":
+                        hasher = new HMACSHA1(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    case "sha224":
+                        hasher = new HMACSHA224(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    case "sha256":
+                        hasher = new HMACSHA256(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    case "sha384":
+                        hasher = new HMACSHA384(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    case "sha512":
+                        hasher = new HMACSHA512(Encoding.UTF8.GetBytes(private_key));
+                        break;
+                    default:
+                        return new LSL_String();
+                }
+
+                byte[] hashBytes;
+                try
+                {
+                    hashBytes = hasher.ComputeHash(Encoding.UTF8.GetBytes(message));
+                }
+                catch
+                {
+                    return new LSL_String();
+                }
+                finally
+                {
+                    hasher.Dispose();
+                }
+                return new LSL_String(Util.bytesToLowcaseHexString(hashBytes));
+            }
+            catch { }
+            return new LSL_String();
         }
 
         public LSL_String llSHA256String(LSL_String input)
@@ -13156,6 +13118,41 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return ScriptBaseClass.NULL_KEY;
         }
 
+        public LSL_Float llGetSimStats(LSL_Integer stat_type)
+        {
+            return stat_type.value switch
+            {
+                ScriptBaseClass.SIM_STAT_PCT_CHARS_STEPPED => 0,     // Not implemented
+                ScriptBaseClass.SIM_STAT_PHYSICS_FPS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.PhysicsFPS],
+                ScriptBaseClass.SIM_STAT_AGENT_UPDATES => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.AgentUpdates],
+                ScriptBaseClass.SIM_STAT_FRAME_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.FrameMS],
+                ScriptBaseClass.SIM_STAT_NET_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.NetMS],
+                ScriptBaseClass.SIM_STAT_OTHER_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.OtherMS],
+                ScriptBaseClass.SIM_STAT_PHYSICS_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.PhysicsMS],
+                ScriptBaseClass.SIM_STAT_AGENT_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.AgentMS],
+                ScriptBaseClass.SIM_STAT_IMAGE_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.ImageMS],
+                ScriptBaseClass.SIM_STAT_SCRIPT_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.ScriptMS],
+                ScriptBaseClass.SIM_STAT_AGENT_COUNT => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.Agents],
+                ScriptBaseClass.SIM_STAT_CHILD_AGENT_COUNT => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.ChildAgents],
+                ScriptBaseClass.SIM_STAT_ACTIVE_SCRIPT_COUNT => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.ActiveScripts],
+                ScriptBaseClass.SIM_STAT_PACKETS_IN => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.InPacketsPerSecond],
+                ScriptBaseClass.SIM_STAT_PACKETS_OUT => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.OutPacketsPerSecond],
+                ScriptBaseClass.SIM_STAT_ASSET_DOWNLOADS => 0,  // Not implemented
+                ScriptBaseClass.SIM_STAT_ASSET_UPLOADS  => 0,  // Not implemented
+                ScriptBaseClass.SIM_STAT_UNACKED_BYTES => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.UnAckedBytes],
+                ScriptBaseClass.SIM_STAT_PHYSICS_STEP_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimPhysicsStepMs],
+                ScriptBaseClass.SIM_STAT_PHYSICS_SHAPE_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimPhysicsShapeMs],
+                ScriptBaseClass.SIM_STAT_PHYSICS_OTHER_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimPhysicsOtherMs],
+                ScriptBaseClass.SIM_STAT_SCRIPT_EPS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.ScriptEps],
+                ScriptBaseClass.SIM_STAT_SPARE_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimSpareMs],
+                ScriptBaseClass.SIM_STAT_SLEEP_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimSleepMs],
+                ScriptBaseClass.SIM_STAT_IO_PUMP_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimIoPumpTime],
+                ScriptBaseClass.SIM_STAT_SCRIPT_RUN_PCT => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimPCTSscriptsRun],
+                ScriptBaseClass.SIM_STAT_AI_MS => World.StatsReporter.LastReportedSimStats[(int)StatsIndex.SimAIStepTimeMS],
+                _ => 0
+            };
+        }
+
         public LSL_Key llRequestSimulatorData(string simulator, int data)
         {
             try
@@ -13736,6 +13733,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             Math.DivRem((long)Math.Pow(a, b), c, out long tmp);
             ScriptSleep(m_sleepMsOnModPow);
             return (int)tmp;
+        }
+
+        public LSL_String llGetInventoryDesc(string name)
+        {
+            TaskInventoryItem item = m_host.Inventory.GetInventoryItem(name);
+            if (item is null)
+            {
+                Error("llGetInventoryDesc", "Item " + name + " not found");
+                return new LSL_String();
+            }
+
+            return new LSL_String(item.Description);
         }
 
         public LSL_Integer llGetInventoryType(string name)
@@ -19399,5 +19408,46 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             return line;
         }
 
+    }
+
+    public class HMACSHA224 : HMAC
+    {
+        public HMACSHA224(byte[] key)
+        {
+            HashName = "SHA-224";
+            HashSizeValue = 224;
+            base.Key = key;
+            HashAlgorithm = new SHA224Managed();
+        }
+
+        public SHA224Managed HashAlgorithm { get; }
+    }
+
+    public class SHA224Managed : SHA256
+    {
+        public byte[] ComputeHashe(byte[] buffer)
+        {
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] fullHash = sha256.ComputeHash(buffer);
+                Array.Resize(ref fullHash, 28); // Truncate to 224 bits
+                return fullHash;
+            }
+        }
+
+        public override void Initialize()
+        {
+            throw new NotImplementedException();
+        }
+
+        protected override void HashCore(byte[] array, int ibStart, int cbSize)
+        {
+            throw new NotImplementedException();
+        }
+
+        protected override byte[] HashFinal()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
