@@ -393,7 +393,7 @@ namespace OpenSim.DiscordNPCBridge
                 m_NPCUUID = npcModule.CreateNPC(m_NPCFirstName, 
                                                m_NPCLastName, 
                                                m_NPCPosition,
-                                               UUID.Zero, // Owner ID
+                                               UUID.Random(), // Owner ID
                                                true,      // Set as AI
                                                scene, appearance);
                                                
