@@ -96,6 +96,7 @@ namespace OpenSim.DiscordNPCBridge
 
             if (!m_Scenes.Contains(scene))
             {
+                m_log.Info($"[DiscordNPCBridge] Region {scene.RegionInfo.RegionName} added.");
                 m_Scenes.Add(scene);
             }
 
