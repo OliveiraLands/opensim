@@ -536,6 +536,11 @@ namespace OpenSim.DiscordNPCBridge
                     }
                 }
             }
+
+            if (m_Scenes.Count == 0)
+            {
+                m_log.Info("[DiscordNPCBridge]: No scenes found...");
+            }
             
             if (needRecreate && m_Scenes.Count > 0)
             {
