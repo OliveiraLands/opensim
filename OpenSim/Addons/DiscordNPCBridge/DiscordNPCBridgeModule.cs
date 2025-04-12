@@ -93,7 +93,12 @@ namespace OpenSim.DiscordNPCBridge
         {
             if (!m_Enabled)
                 return;
-                
+
+            if (!m_Scenes.Contains(scene))
+            {
+                m_Scenes.Add(scene);
+            }
+
             m_log.Info($"[DiscordNPCBridge]: Region {scene.RegionInfo.RegionName} loaded");
             
             INPCModule npcModule = scene.RequestModuleInterface<INPCModule>();
