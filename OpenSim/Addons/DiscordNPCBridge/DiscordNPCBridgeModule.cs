@@ -113,6 +113,8 @@ namespace OpenSim.DiscordNPCBridge
             scene.EventManager.OnChatFromClient += m_OnChatFromClientHandler;
 
             scene.EventManager.OnChatFromWorld += OnChatFromWorld;
+
+            AddNPCRegion();
         }
         
         public void RemoveRegion(Scene scene)
@@ -177,13 +179,18 @@ namespace OpenSim.DiscordNPCBridge
             // Initialize Discord connection
             InitializeDiscord();
 
+            AddNPCRegion();
+        }
+
+        private void AddNPCRegion()
+        {
             m_log.Info("[DiscordNPCBridge]: Post init. Creating NPC.");
 
             // Create the NPC in the first scene
             if (m_Scenes.Count > 0)
             {
                 CreateNPC(m_Scenes[0]);
-                
+
                 // Start periodic scan
                 m_ScanTimer = new Timer(5000); // Scan every 5 seconds
                 m_ScanTimer.Elapsed += OnScanTimerElapsed;
