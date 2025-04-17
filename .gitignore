@@ -120,3 +120,6 @@ doc/doxygen.error.log
 bin/OpenSim.ini
 
 *.patch
+/bin/OpenSim.ConsoleClient.runtimeconfig.json
+/bin/OpenSim.Tools.Configger.runtimeconfig.json
+/bin/pCampBot.runtimeconfig.json
