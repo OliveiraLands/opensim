@@ -204,6 +204,30 @@ namespace OpenSim.DiscordNPCBridge
 
         #region Discord Integration
 
+        private string RecreateNPC()
+        {
+            string resultRecreate = "";
+            // Create the NPC in the first scene
+            if (m_Scenes.Count > 0)
+            {
+                CreateNPC(m_Scenes[0]);
+
+                resultRecreate = "NPC Created at scene " + m_Scenes[0].Name;
+
+                // Start periodic scan
+                m_ScanTimer = new Timer(5000); // Scan every 5 seconds
+                m_ScanTimer.Elapsed += OnScanTimerElapsed;
+                m_ScanTimer.Start();
+            }
+            else
+            {
+                resultRecreate = "[DiscordNPCBridge]: No scenes found.";
+                m_log.Warn(resultRecreate);
+
+            }
+            return resultRecreate;
+        }
+
         private async void InitializeDiscordAsync()
         {
             if (string.IsNullOrEmpty(m_DiscordToken) || m_DiscordChannelId == 0)
@@ -325,7 +349,15 @@ namespace OpenSim.DiscordNPCBridge
                                            "!walk x y z - Walk to the specified coordinates\n" +
                                            "!sit uuid - Sit on the specified object\n" +
                                            "!stand - Stand up\n" +
+                                           "!ping - ping the NPC server\n" +
                                            "!status - Show bot status");
+                    break;
+
+                case "!recreate":
+                    // Recreate NPC 
+                    m_log.Info("[DiscordNPCBridge]: Executing recreate command");
+                    string recreateResults = RecreateNPC();
+                    await SendDiscordMessage(recreateResults);
                     break;
 
                 case "!scan":
