@@ -233,19 +233,22 @@ namespace OpenSim.DiscordNPCBridge
 
             if (m_Scenes.Count > 0)
             {
-                Scene scene = m_Scenes[0];
-                scene.EventManager.OnChatFromClient -= m_OnChatFromClientHandler;
-                scene.EventManager.OnChatFromWorld -= OnChatFromWorld;
-
-                if (m_NPCScenes.ContainsValue(scene))
+                foreach (var scene in m_Scenes)
                 {
-                    UUID npcId = m_NPCScenes.FirstOrDefault(x => x.Value == scene).Key;
-                    if (npcId != UUID.Zero)
+
+                    scene.EventManager.OnChatFromClient -= m_OnChatFromClientHandler;
+                    scene.EventManager.OnChatFromWorld -= OnChatFromWorld;
+
+                    if (m_NPCScenes.ContainsValue(scene))
                     {
-                        INPCModule npcModule = m_NPCModules[npcId];
-                        npcModule.DeleteNPC(npcId, scene);
-                        m_NPCModules.Remove(npcId);
-                        m_NPCScenes.Remove(npcId);
+                        UUID npcId = m_NPCScenes.FirstOrDefault(x => x.Value == scene).Key;
+                        if (npcId != UUID.Zero)
+                        {
+                            INPCModule npcModule = m_NPCModules[npcId];
+                            npcModule.DeleteNPC(npcId, scene);
+                            m_NPCModules.Remove(npcId);
+                            m_NPCScenes.Remove(npcId);
+                        }
                     }
                 }
             }
