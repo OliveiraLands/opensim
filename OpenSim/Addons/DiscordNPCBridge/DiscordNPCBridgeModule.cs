@@ -763,8 +763,8 @@ namespace OpenSim.DiscordNPCBridge
                 return;
 
             // Only process object chat
-            if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
-                return;
+            // if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
+            //    return;
 
             Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
