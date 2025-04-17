@@ -66,7 +66,18 @@ namespace OpenSim.DiscordNPCBridge
                 return;
                 
             m_DiscordToken = config.GetString("DiscordToken", "");
-            m_DiscordChannelId = (ulong)config.GetLong("DiscordChannelId", 0);
+
+            //m_DiscordChannelId = (ulong)config.GetLong("DiscordChannelId", 0);
+            string channelIdStr = config.GetString("DiscordChannelId", "0");
+            if (ulong.TryParse(channelIdStr, out ulong channelId))
+            {
+                m_DiscordChannelId = channelId;
+                m_log.Info($"[DiscordNPCBridge]: Channel ID set to {m_DiscordChannelId}");
+            }
+            else
+            {
+                m_log.Error($"[DiscordNPCBridge]: Failed to parse channel ID '{channelIdStr}' as ulong");
+            }
             m_NPCFirstName = config.GetString("NPCFirstName", "Discord");
             m_NPCLastName = config.GetString("NPCLastName", "Bridge");
             
@@ -169,7 +180,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
                 
             // Initialize Discord connection
-            InitializeDiscord();
+            Task.Run(() => InitializeDiscordAsync()).Wait();
 
             m_log.Info("[DiscordNPCBridge]: Post init. Creating NPC.");
 
@@ -193,28 +204,69 @@ namespace OpenSim.DiscordNPCBridge
         
         #region Discord Integration
         
-        private async void InitializeDiscord()
+        private async void InitializeDiscordAsync()
         {
             if (string.IsNullOrEmpty(m_DiscordToken) || m_DiscordChannelId == 0)
             {
                 m_log.Error("[DiscordNPCBridge]: Discord token or channel ID not configured properly.");
                 return;
             }
-            
+
             try
             {
                 m_DiscordClient = new DiscordSocketClient(new DiscordSocketConfig
                 {
-                    GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.MessageContent
+                    GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent
                 });
-                
+
                 m_DiscordClient.Log += LogDiscord;
+
+                // Add a ready event to confirm when the bot is fully initialized
+                TaskCompletionSource<bool> readyTask = new TaskCompletionSource<bool>();
+                m_DiscordClient.Ready += () =>
+                {
+                    m_log.Info("[DiscordNPCBridge]: Discord client is fully ready");
+                    readyTask.TrySetResult(true);
+                    return Task.CompletedTask;
+                };
+
                 m_DiscordClient.MessageReceived += MessageReceived;
-                
+
                 await m_DiscordClient.LoginAsync(TokenType.Bot, m_DiscordToken);
                 await m_DiscordClient.StartAsync();
-                
-                m_log.Info("[DiscordNPCBridge]: Discord connection initialized");
+
+                // Wait for ready event with timeout
+                bool readySuccess = await Task.WhenAny(readyTask.Task, Task.Delay(30000)) == readyTask.Task;
+
+                if (readySuccess)
+                {
+                    m_log.Info("[DiscordNPCBridge]: Discord connection fully initialized");
+
+                    // Log available guilds and channels
+                    foreach (var guild in m_DiscordClient.Guilds)
+                    {
+                        m_log.Info($"[DiscordNPCBridge]: Connected to guild: {guild.Name} ({guild.Id})");
+                        foreach (var channel in guild.Channels)
+                        {
+                            m_log.Info($"[DiscordNPCBridge]: - Channel: {channel.Name} ({channel.Id})");
+                        }
+                    }
+
+                    // Try to find our target channel
+                    var targetChannel = m_DiscordClient.GetChannel(m_DiscordChannelId);
+                    if (targetChannel != null)
+                    {
+                        m_log.Info($"[DiscordNPCBridge]: Target channel found: {targetChannel.GetType().Name}");
+                    }
+                    else
+                    {
+                        m_log.Error($"[DiscordNPCBridge]: Target channel {m_DiscordChannelId} NOT found");
+                    }
+                }
+                else
+                {
+                    m_log.Error("[DiscordNPCBridge]: Timed out waiting for Discord client to be ready");
+                }
             }
             catch (Exception ex)
             {
@@ -230,8 +282,10 @@ namespace OpenSim.DiscordNPCBridge
         
         private async Task MessageReceived(SocketMessage message)
         {
+            m_log.Info($"[DiscordNPCBridge]: Received message from {message.Author.Username} in channel {message.Channel.Id}");
+
             // Ignore messages from bots or from other channels
-            if (message.Author.IsBot || message.Channel.Id != m_DiscordChannelId)
+            if (message.Author.IsBot) // || message.Channel.Id != m_DiscordChannelId)
                 return;
                 
             string discordMessage = $"{message.Author.Username}: {message.Content}";
@@ -260,6 +314,8 @@ namespace OpenSim.DiscordNPCBridge
             string[] parts = message.Content.Split(' ');
             string command = parts[0].ToLower();
             
+            m_log.Info($"[DiscordNPCBridge]: Processing command: {command}");
+
             switch (command)
             {
                 case "!help":
@@ -274,11 +330,13 @@ namespace OpenSim.DiscordNPCBridge
                     
                 case "!scan":
                     // Scan for nearby avatars and objects
+                    m_log.Info("[DiscordNPCBridge]: Executing scan command");
                     string scanResults = ScanNearby();
                     await SendDiscordMessage(scanResults);
                     break;
                     
                 case "!walk":
+                    m_log.Info("[DiscordNPCBridge]: Executing walk command");
                     if (parts.Length >= 4 && float.TryParse(parts[1], out float x) && 
                         float.TryParse(parts[2], out float y) && float.TryParse(parts[3], out float z))
                     {
@@ -292,6 +350,7 @@ namespace OpenSim.DiscordNPCBridge
                     break;
                     
                 case "!sit":
+                    m_log.Info("[DiscordNPCBridge]: Executing sit command");
                     if (parts.Length >= 2 && UUID.TryParse(parts[1], out UUID targetId))
                     {
                         bool sat = SitNPC(targetId);
@@ -307,15 +366,19 @@ namespace OpenSim.DiscordNPCBridge
                     break;
                     
                 case "!stand":
+                    m_log.Info("[DiscordNPCBridge]: Executing stand command");
                     StandNPC();
                     await SendDiscordMessage("Standing up");
                     break;
                     
                 case "!status":
+                    m_log.Info("[DiscordNPCBridge]: Executing Status command");
                     string status = GetNPCStatus();
                     await SendDiscordMessage(status);
                     break;
-                    
+                case "!ping":
+                    await SendDiscordMessage("Pong! Discord bridge is working.");
+                    break;
                 default:
                     await SendDiscordMessage($"Unknown command: {command}. Type !help for a list of commands.");
                     break;
@@ -326,15 +389,38 @@ namespace OpenSim.DiscordNPCBridge
         {
             try
             {
-                var channel = m_DiscordClient.GetChannel(m_DiscordChannelId) as IMessageChannel;
-                if (channel != null)
+                m_log.Info($"[DiscordNPCBridge]: Attempting to send message to Discord. Channel ID: {m_DiscordChannelId}");
+                var baseChannel = m_DiscordClient.GetChannel(m_DiscordChannelId);
+
+                if (baseChannel == null)
                 {
-                    await channel.SendMessageAsync(message);
+                    m_log.Error($"[DiscordNPCBridge]: Channel {m_DiscordChannelId} not found at all");
+
+                    // Log all available channels for debugging
+                    foreach (var guild in m_DiscordClient.Guilds)
+                    {
+                        m_log.Info($"[DiscordNPCBridge]: Bot is in guild: {guild.Name} ({guild.Id})");
+                        foreach (var channel in guild.Channels)
+                        {
+                            m_log.Info($"[DiscordNPCBridge]: - Channel: {channel.Name} ({channel.Id})");
+                        }
+                    }
+                    return;
                 }
+
+                if (baseChannel is not IMessageChannel textChannel)
+                {
+                    m_log.Error($"[DiscordNPCBridge]: Channel {m_DiscordChannelId} exists but is not a text channel");
+                    return;
+                }
+
+                await textChannel.SendMessageAsync(message);
+                m_log.Info("[DiscordNPCBridge]: Message sent successfully");
             }
             catch (Exception ex)
             {
-                m_log.Error($"[DiscordNPCBridge]: Error sending Discord message: {ex.Message}");
+                m_log.Error($"[DiscordNPCBridge]: Error in SendDiscordMessage: {ex.GetType().Name}: {ex.Message}");
+                m_log.Error($"[DiscordNPCBridge]: Stack trace: {ex.StackTrace}");
             }
         }
         
@@ -438,6 +524,14 @@ namespace OpenSim.DiscordNPCBridge
         
         private string ScanNearby()
         {
+            m_log.Info("[DiscordNPCBridge]: Starting scan for nearby entities");
+
+            if (m_NPCModules.Count == 0 || m_NPCScenes.Count == 0)
+            {
+                m_log.Warn("[DiscordNPCBridge]: No NPCs available for scanning");
+                return "Error: No NPC available to perform scanning";
+            }
+
             string result = "Nearby avatars and objects:\n";
             
             foreach (UUID npcId in m_NPCModules.Keys)
