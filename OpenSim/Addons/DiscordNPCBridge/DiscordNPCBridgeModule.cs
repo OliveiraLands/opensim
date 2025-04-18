@@ -118,6 +118,11 @@ namespace OpenSim.DiscordNPCBridge
             scene.EventManager.OnChatFromClient += m_OnChatFromClientHandler;
 
             scene.EventManager.OnChatFromWorld += OnChatFromWorld;
+
+            CreateNPC(scene);
+
+            _ = SendDiscordMessage("[Teste] Bridge online!");
+
         }
 
         public void RemoveRegion(Scene scene)
@@ -180,7 +185,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
 
             // Initialize Discord connection
-            Task.Run(() => InitializeDiscordAsync()).Wait();
+            InitializeDiscordAsync().GetAwaiter().GetResult();
 
             m_log.Info("[DiscordNPCBridge]: Post init. Creating NPC.");
 
@@ -255,7 +260,7 @@ namespace OpenSim.DiscordNPCBridge
             return resultRemove;
         }
 
-        private async void InitializeDiscordAsync()
+        private async Task InitializeDiscordAsync()
         {
             if (string.IsNullOrEmpty(m_DiscordToken) || m_DiscordChannelId == 0)
             {
