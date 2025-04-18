@@ -33,6 +33,7 @@ namespace OpenSim.DiscordNPCBridge
 
         // NPC configuration
         private UUID m_NPCUUID;
+        private string m_CloneAVATAR;
         private string m_NPCFirstName = "Discord";
         private string m_NPCLastName = "Bridge";
         private Vector3 m_NPCPosition = new Vector3(128, 128, 25);
@@ -66,6 +67,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
 
             m_DiscordToken = config.GetString("DiscordToken", "");
+            m_CloneAVATAR = config.GetString("UUID_BotAvatarClone", "");
 
             //m_DiscordChannelId = (ulong)config.GetLong("DiscordChannelId", 0);
             string channelIdStr = config.GetString("DiscordChannelId", "0");
@@ -524,12 +526,28 @@ namespace OpenSim.DiscordNPCBridge
             {
                 m_log.Info("[DiscordNPCBridge]: NPC module found. Creating NPC.");
 
-                UUID ownerId = scene.RegionInfo.EstateSettings.EstateOwner;
                 IAvatarService avatarService = scene.RequestModuleInterface<IAvatarService>();
                 AvatarAppearance appearance = null;
+
+                UUID ownerId = scene.RegionInfo.EstateSettings.EstateOwner;
+
                 if (avatarService != null)
                 {
-                    appearance = avatarService.GetAppearance(ownerId);
+                    if (m_CloneAVATAR != "")
+                    {
+                        try
+                        {
+                            appearance = avatarService.GetAppearance(UUID.Parse(m_CloneAVATAR));
+                        }
+                        catch(Exception ex)
+                        {
+                            m_log.Error($"[DiscordNPCBridge]: Error getting appearance. {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        appearance = avatarService.GetAppearance(ownerId);
+                    }
                 }
                 else
                 {
@@ -607,6 +625,8 @@ namespace OpenSim.DiscordNPCBridge
 
             string result = "Nearby avatars and objects:\n";
 
+            result += $"   Total found : {m_NPCModules.Count}\n";
+
             foreach (UUID npcId in m_NPCModules.Keys)
             {
                 if (m_NPCScenes.TryGetValue(npcId, out Scene scene))
@@ -618,7 +638,7 @@ namespace OpenSim.DiscordNPCBridge
                     Vector3 npcPos = npcObject.AbsolutePosition;
 
                     // Scan for avatars
-                    result += "Avatars:\n";
+                    result += "   Avatars:\n";
                     foreach (ScenePresence avatar in scene.GetScenePresences())
                     {
                         if (avatar.UUID == npcId)
@@ -629,12 +649,12 @@ namespace OpenSim.DiscordNPCBridge
 
                         if (distance <= m_ListenRadius * 2) // Double radius for scanning
                         {
-                            result += $"  {avatar.Name} ({distance:F1}m away)\n";
+                            result += $"     {avatar.Name} ({distance:F1}m away)\n";
                         }
                     }
 
                     // Scan for nearby objects
-                    result += "Objects:\n";
+                    result += "   Objects:\n";
                     int objectCount = 0;
                     foreach (SceneObjectGroup obj in scene.GetSceneObjectGroups())
                     {
@@ -646,13 +666,13 @@ namespace OpenSim.DiscordNPCBridge
 
                         if (distance <= m_ListenRadius * 2) // Double radius for scanning
                         {
-                            result += $"  {obj.Name} (UUID: {obj.UUID}, {distance:F1}m away)\n";
+                            result += $"     {obj.Name} (UUID: {obj.UUID}, {distance:F1}m away)\n";
                             objectCount++;
 
                             // Limit to 10 objects to avoid flooding
                             if (objectCount >= 10)
                             {
-                                result += "  ... (and more)\n";
+                                result += "     ... (and more)\n";
                                 break;
                             }
                         }
