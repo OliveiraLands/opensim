@@ -123,3 +123,4 @@ bin/OpenSim.ini
 /bin/OpenSim.ConsoleClient.runtimeconfig.json
 /bin/OpenSim.Tools.Configger.runtimeconfig.json
 /bin/pCampBot.runtimeconfig.json
+/bin/config-include/StandaloneCommon.ini - Copia.example
