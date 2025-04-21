@@ -553,11 +553,12 @@ namespace OpenSim.DiscordNPCBridge
                 {
                     appearance = new AvatarAppearance();
                 }
+                UUID ownerIdRoot = scene.RegionInfo.EstateSettings.EstateOwner;
 
                 m_NPCUUID = npcModule.CreateNPC(m_NPCFirstName,
                                                m_NPCLastName,
                                                m_NPCPosition,
-                                               UUID.Zero, // Owner ID
+                                               ownerIdRoot, // Owner ID
                                                true,      // Set as AI
                                                scene, appearance);
 
