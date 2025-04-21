@@ -539,7 +539,7 @@ namespace OpenSim.DiscordNPCBridge
                         {
                             appearance = avatarService.GetAppearance(UUID.Parse(m_CloneAVATAR));
                         }
-                        catch(Exception ex)
+                        catch (Exception ex)
                         {
                             m_log.Error($"[DiscordNPCBridge]: Error getting appearance. {ex.Message}");
                         }
@@ -565,6 +565,13 @@ namespace OpenSim.DiscordNPCBridge
 
                 m_NPCModules[m_NPCUUID] = npcModule;
                 m_NPCScenes[m_NPCUUID] = scene;
+
+                SceneObjectGroup npcObj = scene.GetSceneObjectGroup(m_NPCUUID);
+                if (npcObj != null)
+                    m_log.Info($"[DiscordNPCBridge]: NPC AbsolutePosition = {npcObj.AbsolutePosition}");
+                else
+                    m_log.Warn("[DiscordNPCBridge]: I couldn't find SceneObjectGroup for NPC after creaton!");
+
 
                 // Say hello
                 npcModule.Say(m_NPCUUID, scene, "Discord Bridge NPC activated. I'm relaying messages between OpenSim and Discord.");
@@ -629,51 +636,63 @@ namespace OpenSim.DiscordNPCBridge
 
             foreach (UUID npcId in m_NPCModules.Keys)
             {
-                if (m_NPCScenes.TryGetValue(npcId, out Scene scene))
+                if (!m_NPCScenes.TryGetValue(npcId, out Scene scene))
                 {
-                    SceneObjectGroup npcObject = scene.GetSceneObjectGroup(npcId);
-                    if (npcObject == null)
+                    m_log.Warn($"[DiscordNPCBridge]: NPC {npcId} não associado a nenhuma cena");
+                    continue;
+                }
+
+                // Quantos avatares/objetos a cena tem
+                var presences = scene.GetScenePresences();
+                var objects = scene.GetSceneObjectGroups();
+                m_log.Info($"[DiscordNPCBridge]: Scene '{scene.RegionInfo.RegionName}' have {presences.Count} presences and {objects.Count} objects");
+
+                SceneObjectGroup npcObject = scene.GetSceneObjectGroup(npcId);
+                if (npcObject == null)
+                {
+                    m_log.Warn($"[DiscordNPCBridge]: I didn't find SceneObjectGroup for NPC {npcId}");
+                    continue;
+                }
+
+                Vector3 npcPos = npcObject.AbsolutePosition;
+
+                // Scan for avatars
+                result += "   Avatars:\n";
+                foreach (ScenePresence avatar in scene.GetScenePresences())
+                {
+                    if (avatar.UUID == npcId)
                         continue;
 
-                    Vector3 npcPos = npcObject.AbsolutePosition;
+                    float dist = Vector3.Distance(npcPos, avatar.AbsolutePosition);
+                    m_log.Info($"[DiscordNPCBridge]: found {avatar.Name} at {dist:F1}m");
+                    if (dist <= m_ListenRadius * 2)
+                        result += $"  {avatar.Name} ({dist:F1}m)\n";
+                }
 
-                    // Scan for avatars
-                    result += "   Avatars:\n";
-                    foreach (ScenePresence avatar in scene.GetScenePresences())
+                // Scan for nearby objects
+                result += "   Objects:\n";
+                int objectCount = 0;
+                foreach (SceneObjectGroup obj in scene.GetSceneObjectGroups())
+                {
+                    if (obj.UUID == npcId)
+                        continue;
+
+                    Vector3 objPos = obj.AbsolutePosition;
+                    float distance = Vector3.Distance(npcPos, objPos);
+
+                    if (distance <= m_ListenRadius * 2) // Double radius for scanning
                     {
-                        if (avatar.UUID == npcId)
-                            continue;
+                        result += $"     {obj.Name} (UUID: {obj.UUID}, {distance:F1}m away)\n";
+                        objectCount++;
 
-                        float dist = Vector3.Distance(npcPos, avatar.AbsolutePosition);
-                        m_log.Info($"[DiscordNPCBridge]: Encontrado {avatar.Name} a {dist:F1}m");
-                        if (dist <= m_ListenRadius * 2)
-                            result += $"  {avatar.Name} ({dist:F1}m)\n";
-                    }
-
-                    // Scan for nearby objects
-                    result += "   Objects:\n";
-                    int objectCount = 0;
-                    foreach (SceneObjectGroup obj in scene.GetSceneObjectGroups())
-                    {
-                        if (obj.UUID == npcId)
-                            continue;
-
-                        Vector3 objPos = obj.AbsolutePosition;
-                        float distance = Vector3.Distance(npcPos, objPos);
-
-                        if (distance <= m_ListenRadius * 2) // Double radius for scanning
+                        // Limit to 10 objects to avoid flooding
+                        if (objectCount >= 10)
                         {
-                            result += $"     {obj.Name} (UUID: {obj.UUID}, {distance:F1}m away)\n";
-                            objectCount++;
-
-                            // Limit to 10 objects to avoid flooding
-                            if (objectCount >= 10)
-                            {
-                                result += "     ... (and more)\n";
-                                break;
-                            }
+                            result += "     ... (and more)\n";
+                            break;
                         }
                     }
+
                 }
             }
 
