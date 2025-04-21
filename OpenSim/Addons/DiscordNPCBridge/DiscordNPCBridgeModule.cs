@@ -777,6 +777,9 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
 
+            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
+
+
             // Get the chat senderPresence
             ScenePresence senderPresence = scene.GetScenePresence(chat.SenderUUID);
             if (senderPresence == null)
@@ -807,6 +810,8 @@ namespace OpenSim.DiscordNPCBridge
             // Only process object chat
             // if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
             //    return;
+            
+            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
 
             Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
