@@ -758,7 +758,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
 
             // Ignore chat from the NPC itself
-            if (chat.Sender.Equals(m_NPCUUID))
+            if (chat.Sender.AgentId.Equals(m_NPCUUID))
                 return;
 
             // Check if the chat source is within range of the NPC
@@ -777,11 +777,11 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
 
-            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
+            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
 
 
             // Get the chat senderPresence
-            ScenePresence senderPresence = scene.GetScenePresence(chat.SenderUUID);
+            ScenePresence senderPresence = scene.GetScenePresence(chat.Sender.AgentId);
             if (senderPresence == null)
                 return;
 
