@@ -625,7 +625,7 @@ namespace OpenSim.DiscordNPCBridge
 
             string result = "Nearby avatars and objects:\n";
 
-            result += $"   Total found : {m_NPCModules.Count}\n";
+            result += $"   Total NPC Modules found : {m_NPCModules.Count}\n";
 
             foreach (UUID npcId in m_NPCModules.Keys)
             {
@@ -644,13 +644,10 @@ namespace OpenSim.DiscordNPCBridge
                         if (avatar.UUID == npcId)
                             continue;
 
-                        Vector3 avatarPos = avatar.AbsolutePosition;
-                        float distance = Vector3.Distance(npcPos, avatarPos);
-
-                        if (distance <= m_ListenRadius * 2) // Double radius for scanning
-                        {
-                            result += $"     {avatar.Name} ({distance:F1}m away)\n";
-                        }
+                        float dist = Vector3.Distance(npcPos, avatar.AbsolutePosition);
+                        m_log.Info($"[DiscordNPCBridge]: Encontrado {avatar.Name} a {dist:F1}m");
+                        if (dist <= m_ListenRadius * 2)
+                            result += $"  {avatar.Name} ({dist:F1}m)\n";
                     }
 
                     // Scan for nearby objects
