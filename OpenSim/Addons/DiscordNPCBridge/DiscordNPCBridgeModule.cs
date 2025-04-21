@@ -194,7 +194,12 @@ namespace OpenSim.DiscordNPCBridge
             // Create the NPC in the first scene
             if (m_Scenes.Count > 0)
             {
-                CreateNPC(m_Scenes[0]);
+
+                foreach (var scene in m_Scenes)
+                {
+                    CreateNPC(scene);
+                }
+                
 
                 // Start periodic scan
                 m_ScanTimer = new Timer(5000); // Scan every 5 seconds
