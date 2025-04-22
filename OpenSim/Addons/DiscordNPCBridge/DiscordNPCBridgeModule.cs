@@ -14,6 +14,8 @@ using Discord;
 using Discord.WebSocket;
 using System.Linq;
 using OpenSim.Services.Interfaces;
+using System.Threading;
+using Timer = System.Timers.Timer;
 
 namespace OpenSim.DiscordNPCBridge
 {
@@ -121,9 +123,9 @@ namespace OpenSim.DiscordNPCBridge
 
             scene.EventManager.OnChatFromWorld += OnChatFromWorld;
 
-            CreateNPC(scene);
+            // CreateNPC(scene);
 
-            _ = SendDiscordMessage("[Teste] Bridge online!");
+            //_ = SendDiscordMessage("[Teste] Bridge online!");
 
         }
 
@@ -199,7 +201,6 @@ namespace OpenSim.DiscordNPCBridge
                 {
                     CreateNPC(scene);
                 }
-                
 
                 // Start periodic scan
                 m_ScanTimer = new Timer(5000); // Scan every 5 seconds
@@ -222,9 +223,11 @@ namespace OpenSim.DiscordNPCBridge
             // Create the NPC in the first scene
             if (m_Scenes.Count > 0)
             {
-                CreateNPC(m_Scenes[0]);
-
-                resultRecreate = "NPC Created at scene " + m_Scenes[0].Name;
+                foreach (var scene in m_Scenes)
+                {
+                    CreateNPC(scene);
+                    resultRecreate = "NPC Created at scene " + scene.Name + "\n";
+                }
 
                 // Start periodic scan
                 m_ScanTimer = new Timer(5000); // Scan every 5 seconds
@@ -247,7 +250,6 @@ namespace OpenSim.DiscordNPCBridge
             {
                 foreach (var scene in m_Scenes)
                 {
-
                     scene.EventManager.OnChatFromClient -= m_OnChatFromClientHandler;
                     scene.EventManager.OnChatFromWorld -= OnChatFromWorld;
 
@@ -494,7 +496,7 @@ namespace OpenSim.DiscordNPCBridge
                     return;
                 }
 
-                await textChannel.SendMessageAsync(message);
+                await textChannel.SendMessageAsync($" Region : {m_Scenes[0].Name} : {message}");
                 m_log.Info("[DiscordNPCBridge]: Message sent successfully");
             }
             catch (Exception ex)
@@ -535,6 +537,7 @@ namespace OpenSim.DiscordNPCBridge
                 AvatarAppearance appearance = null;
 
                 UUID ownerId = scene.RegionInfo.EstateSettings.EstateOwner;
+                string origimAppearence = "nowhere";
 
                 if (avatarService != null)
                 {
@@ -543,6 +546,7 @@ namespace OpenSim.DiscordNPCBridge
                         try
                         {
                             appearance = avatarService.GetAppearance(UUID.Parse(m_CloneAVATAR));
+                            origimAppearence = "cloned from .ini";
                         }
                         catch (Exception ex)
                         {
@@ -552,11 +556,13 @@ namespace OpenSim.DiscordNPCBridge
                     else
                     {
                         appearance = avatarService.GetAppearance(ownerId);
+                        origimAppearence = "cloned from state owner";
                     }
                 }
                 else
                 {
                     appearance = new AvatarAppearance();
+                    origimAppearence = "nowhere (avatarService null)";
                 }
                 UUID ownerIdRoot = scene.RegionInfo.EstateSettings.EstateOwner;
 
@@ -567,7 +573,7 @@ namespace OpenSim.DiscordNPCBridge
                                                true,      // Set as AI
                                                scene, appearance);
 
-                m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID}");
+                m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID} and appearence {origimAppearence}");
 
                 m_NPCModules[m_NPCUUID] = npcModule;
                 m_NPCScenes[m_NPCUUID] = scene;
@@ -749,7 +755,10 @@ namespace OpenSim.DiscordNPCBridge
             if (needRecreate && m_Scenes.Count > 0)
             {
                 m_log.Info("[DiscordNPCBridge]: NPC not found, recreating...");
-                CreateNPC(m_Scenes[0]);
+                foreach (var scene in m_Scenes)
+                {
+                    CreateNPC(scene);
+                }
             }
         }
 
@@ -782,7 +791,7 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
 
-            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
+            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
 
 
             // Get the chat senderPresence
@@ -795,7 +804,7 @@ namespace OpenSim.DiscordNPCBridge
                 return;
 
             // Only relay public chat or whispers to the NPC
-            if (chat.Type == ChatTypeEnum.Say || chat.Type == ChatTypeEnum.Whisper)
+            if (chat.Type == ChatTypeEnum.Say || chat.Type == ChatTypeEnum.Whisper || chat.Type == ChatTypeEnum.Shout)
             {
                 string message = $"{senderPresence.Name}: {chat.Message}";
                 _ = SendDiscordMessage(message);
@@ -816,7 +825,7 @@ namespace OpenSim.DiscordNPCBridge
             // if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
             //    return;
             
-            m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
+            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
 
             Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
