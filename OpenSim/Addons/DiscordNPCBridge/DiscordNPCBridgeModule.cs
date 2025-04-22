@@ -348,7 +348,7 @@ namespace OpenSim.DiscordNPCBridge
             m_log.Info($"[DiscordNPCBridge]: Received message from {message.Author.Username} in channel {message.Channel.Id}");
 
             // Ignore messages from bots or from other channels
-            if (message.Author.IsBot) // || message.Channel.Id != m_DiscordChannelId)
+            if (message.Author.IsBot || message.Channel.Id != m_DiscordChannelId)
                 return;
 
             string discordMessage = $"{message.Author.Username}: {message.Content}";
