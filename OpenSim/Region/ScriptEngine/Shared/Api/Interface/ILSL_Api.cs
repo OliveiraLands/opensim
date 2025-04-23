@@ -43,7 +43,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
     {
         void state(string newState);
 
-                   //ApiDesc Returns absolute version as val (ie as postive value)
+                   //ApiDesc Returns absolute version as val (ie as positive value)
        LSL_Integer llAbs(LSL_Integer val);
                    //ApiDesc Returns cosine of val (val in radians)
          LSL_Float llAcos(LSL_Float val);
@@ -264,6 +264,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llListenControl(int number, int active);
               void llListenRemove(int number);
        LSL_Integer llListFindList(LSL_List src, LSL_List test);
+       LSL_Integer llListFindListNext(LSL_List src, LSL_List test, LSL_Integer instance);
        LSL_Integer llListFindStrided(LSL_List src, LSL_List test, LSL_Integer lstart, LSL_Integer lend, LSL_Integer lstride);
           LSL_List llListInsertList(LSL_List dest, LSL_List src, int start);
           LSL_List llListRandomize(LSL_List src, int stride);
@@ -326,6 +327,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llRemoveVehicleFlags(int flags);
            LSL_Key llRequestUserKey(LSL_String username);
            LSL_Key llRequestAgentData(string id, int data);
+          LSL_List llGetVisualParams(string id, LSL_List visualparams);
            LSL_Key llRequestInventoryData(LSL_String name);
               void llRequestPermissions(string agent, int perm);
            LSL_Key llRequestSecureURL();
@@ -532,5 +534,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_Integer llGetLinkSitFlags(LSL_Integer linknum);
                void llSetLinkSitFlags(LSL_Integer linknum, LSL_Integer flags);
          LSL_String llHMAC(LSL_String private_key, LSL_String message, LSL_String algo);
+         LSL_String llComputeHash(LSL_String message, LSL_String algo);
     }
 }
