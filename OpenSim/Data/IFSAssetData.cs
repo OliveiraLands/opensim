@@ -43,5 +43,6 @@ namespace OpenSim.Data
         bool            Store(AssetMetadata metadata, string hash);
         void            Import(string conn, string table, int start, int count, bool force, FSStoreDelegate store);
         int             Count();
+        List<AssetMetadata> GetAllAssets();
     }
 }

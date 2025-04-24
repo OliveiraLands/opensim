@@ -597,7 +597,41 @@
 
     </Project>
 
-    <Project name="OpenSim.Services.AuthorizationService" path="OpenSim/Services/AuthorizationService" type="Library">
+	  <Project name="OpenSim.Services.S3AssetService" path="OpenSim/Services/S3AssetService" type="Library">
+		  <Configuration name="Debug">
+			  <Options>
+				  <OutputPath>../../../bin/</OutputPath>
+			  </Options>
+		  </Configuration>
+		  <Configuration name="Release">
+			  <Options>
+				  <OutputPath>../../../bin/</OutputPath>
+			  </Options>
+		  </Configuration>
+		  <Package name="AWSSDK.S3" version="3.7.0" />
+		  <ReferencePath>../../../bin/</ReferencePath>
+		  <ReferencePath>
+			  <Path>../../../bin/</Path>
+			  <Path>../packages/awssdk.s3/3.7.416.14/lib/net8.0</Path>
+		  </ReferencePath>
+		  <Reference name="AWSSDK.S3" />
+		  <Reference name="OpenMetaverseTypes"/>
+		  <Reference name="OpenMetaverse"/>
+		  <Reference name="OpenSim.Framework"/>
+		  <Reference name="OpenSim.Framework.Console"/>
+		  <Reference name="OpenSim.Framework.Serialization"/>
+		  <Reference name="OpenSim.Framework.Servers.HttpServer"/>
+		  <Reference name="OpenSim.Server.Base"/>
+		  <Reference name="OpenSim.Services.Interfaces"/>
+		  <Reference name="OpenSim.Services.Base"/>
+		  <Reference name="OpenSim.Services.Connectors"/>
+		  <Reference name="OpenSim.Data"/>
+		  <Reference name="Nini"/>
+		  <Reference name="log4net"/>
+		  
+	  </Project>
+
+	  <Project name="OpenSim.Services.AuthorizationService" path="OpenSim/Services/AuthorizationService" type="Library">
       <Configuration name="Debug">
         <Options>
           <OutputPath>../../../bin/</OutputPath>

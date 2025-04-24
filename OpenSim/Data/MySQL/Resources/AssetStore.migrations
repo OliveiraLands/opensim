@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `assets` (
   `access_time` int(11) DEFAULT '0',
   `asset_flags` int(11) NOT NULL DEFAULT '0',
   `CreatorID` varchar(128) NOT NULL DEFAULT '',
+  `hash` varchar(64) NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

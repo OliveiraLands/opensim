@@ -311,6 +311,11 @@ namespace OpenSim.Data.PGSQL
             MainConsole.Instance.Output(String.Format("Import done, {0} assets imported", imported));
         }
 
+        public List<AssetMetadata> GetAllAssets()
+        {
+            throw new NotImplementedException();
+        }
+
         #endregion
     }
 }

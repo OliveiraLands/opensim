@@ -274,6 +274,8 @@ namespace OpenSim.Framework
         private string m_creatorid;
         private AssetFlags m_flags;
 
+        public string Hash { get; set; } 
+
         public UUID FullID
         {
             get { return m_fullid; }

@@ -175,6 +175,7 @@ namespace OpenSim.Data.MySQL
                         meta.ContentType = SLUtil.SLAssetTypeToContentType(meta.Type);
                         meta.CreationDate = Util.ToDateTime(Convert.ToInt32(reader["create_time"]));
                         meta.Flags = (AssetFlags)Convert.ToInt32(reader["asset_flags"]);
+                        meta.Hash = reader["hash"].ToString();
 
                         int AccessTime = Convert.ToInt32(reader["access_time"]);
                         UpdateAccessTime(id, AccessTime);
@@ -428,6 +429,32 @@ namespace OpenSim.Data.MySQL
             MainConsole.Instance.Output(String.Format("Import done, {0} assets imported", imported));
         }
 
+        public List<AssetMetadata> GetAllAssets()
+        {
+            List<AssetMetadata> assets = new List<AssetMetadata>();
+            using (var connection = new MySqlConnection(m_ConnectionString))
+            {
+                connection.Open();
+                using (var cmd = new MySqlCommand("SELECT * FROM assets", connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        AssetMetadata metadata = new AssetMetadata
+                        {
+                            ID = reader["id"].ToString(),
+                            Hash = reader["hash"].ToString(),
+                            Name = reader["name"].ToString(),
+                            Description = reader["description"].ToString(),
+                            Type = (sbyte)reader["assetType"]
+                            // Adicione outros campos conforme a estrutura do seu banco
+                        };
+                        assets.Add(metadata);
+                    }
+                }
+            }
+            return assets;
+        }
         #endregion
     }
 }
