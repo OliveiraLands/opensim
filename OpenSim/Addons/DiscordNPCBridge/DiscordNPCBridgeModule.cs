@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -388,6 +388,7 @@ namespace OpenSim.DiscordNPCBridge
                                            "!help - Display this help\n" +
                                            "!scan - Scan for nearby avatars\n" +
                                            "!walk x y z - Walk to the specified coordinates\n" +
+                                           "!clone first last - clone avatar\n" +
                                            "!sit uuid - Sit on the specified object\n" +
                                            "!stand - Stand up\n" +
                                            "!ping - ping the NPC server\n" +
@@ -415,6 +416,19 @@ namespace OpenSim.DiscordNPCBridge
                     m_log.Info("[DiscordNPCBridge]: Executing scan command");
                     string scanResults = ScanNearby();
                     await SendDiscordMessage(scanResults);
+                    break;
+
+                case "!clone":
+                    m_log.Info("[DiscordNPCBridge]: Executing walk command");
+                    if(parts .Length == 3)
+                    {
+                        CloneNPC(parts[1], parts[2]);
+                        await SendDiscordMessage($"Cloned {parts[1]} {parts[2]}");
+                    }
+                    else
+                    {
+                        await SendDiscordMessage("Usage: !clone Firstname LastName");
+                    }
                     break;
 
                 case "!walk":
@@ -464,6 +478,57 @@ namespace OpenSim.DiscordNPCBridge
                 default:
                     await SendDiscordMessage($"Unknown command: {command}. Type !help for a list of commands.");
                     break;
+            }
+        }
+
+        private async void CloneNPC(string v1, string v2)
+        {
+            if (!m_Enabled)
+                return;
+
+            string targetName = v1 + " " + v2;
+
+            foreach (var kv in m_NPCScenes)
+            {
+                UUID oldNpcId = kv.Key;
+                Scene scene = kv.Value;
+                INPCModule npcMod = m_NPCModules[oldNpcId];
+
+                // tenta achar o ScenePresence do avatar alvo
+                var pres = scene.GetScenePresences()
+                                .FirstOrDefault(p => p.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase));
+                if (pres != null)
+                {
+                    // clona a aparência
+                    var avatarService = scene.RequestModuleInterface<IAvatarService>();
+                    var appearance = avatarService?.GetAppearance(pres.UUID);
+                    if (appearance == null)
+                    {
+                        await SendDiscordMessage($"Can't loca avatar appearence {targetName}.");
+                        return;
+                    }
+
+                    // remove o NPC antigo
+                    npcMod.DeleteNPC(oldNpcId, scene);
+                    m_NPCModules.Remove(oldNpcId);
+                    m_NPCScenes.Remove(oldNpcId);
+
+                    // cria novo NPC com a mesma aparência
+                    UUID newNpcId = npcMod.CreateNPC(
+                        m_NPCFirstName,
+                        m_NPCLastName,
+                        m_NPCPosition,
+                        scene.RegionInfo.EstateSettings.EstateOwner,
+                        true,
+                        scene,
+                        appearance);
+
+                    m_NPCModules[newNpcId] = npcMod;
+                    m_NPCScenes[newNpcId] = scene;
+
+                    await SendDiscordMessage($"NPC cloned with {targetName} (UUID {pres.UUID}).");
+                    return;
+                }
             }
         }
 
@@ -650,7 +715,7 @@ namespace OpenSim.DiscordNPCBridge
             {
                 if (!m_NPCScenes.TryGetValue(npcId, out Scene scene))
                 {
-                    m_log.Warn($"[DiscordNPCBridge]: NPC {npcId} n�o associado a nenhuma cena");
+                    m_log.Warn($"[DiscordNPCBridge]: NPC {npcId} não associado a nenhuma cena");
                     continue;
                 }
 
@@ -791,7 +856,7 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
 
-            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired � Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
+            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
 
 
             // Get the chat senderPresence
@@ -825,7 +890,7 @@ namespace OpenSim.DiscordNPCBridge
             // if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
             //    return;
             
-            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired � Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
+            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
 
             Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
