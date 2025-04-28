@@ -93,7 +93,7 @@ namespace OpenSim.Services.S3AssetService
             // Configuração do banco de dados
             string dllName = assetConfig.GetString("StorageProvider", string.Empty);
             string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
-            string realm = assetConfig.GetString("Realm", "S3ASSETS");
+            string realm = assetConfig.GetString("Realm", "s3assets");
 
             int SkipAccessTimeDays = assetConfig.GetInt("DaysBetweenAccessTimeUpdates", 0);
 
@@ -133,12 +133,32 @@ namespace OpenSim.Services.S3AssetService
             string s3AccessKey = assetConfig.GetString("S3AccessKey", string.Empty);
             string s3SecretKey = assetConfig.GetString("S3SecretKey", string.Empty);
             string s3Region = assetConfig.GetString("S3Region", "us-east-1");
+            string S3ServiceURL = assetConfig.GetString("S3ServiceURL", null);
             s3Bucket = assetConfig.GetString("S3Bucket", string.Empty);
 
-            if (string.IsNullOrEmpty(s3AccessKey) || string.IsNullOrEmpty(s3SecretKey) || string.IsNullOrEmpty(s3Bucket))
+            if (string.IsNullOrEmpty(s3AccessKey) || string.IsNullOrEmpty(s3SecretKey) || string.IsNullOrEmpty(s3Bucket) 
+                || string.IsNullOrEmpty(S3ServiceURL))
                 throw new Exception("Missing S3 configuration");
 
-            s3Client = new AmazonS3Client(s3AccessKey, s3SecretKey, RegionEndpoint.GetBySystemName(s3Region));
+            // lê o endpoint customizado (ServiceURL) e o flag de path style
+            var forcePathStyle = assetConfig.GetBoolean("S3ForcePathStyle", false);
+
+            var s3Config = new AmazonS3Config();
+
+            if (!string.IsNullOrEmpty(S3ServiceURL))
+            {
+                // usa URL customizada e path-style (requerido por MinIO)
+                s3Config.ServiceURL = S3ServiceURL;
+                s3Config.ForcePathStyle = forcePathStyle;
+            }
+            else
+            {
+                // fallback para AWS S3 “padrão” via região
+                var region = assetConfig.GetString("S3Region", "us-east-1");
+                s3Config.RegionEndpoint = RegionEndpoint.GetBySystemName(region);
+            }
+
+            s3Client = new AmazonS3Client(s3AccessKey, s3SecretKey, s3Config);
 
             m_log.Info("[S3ASSETS]: FS asset service enabled with S3 storage");
         }
@@ -493,6 +513,10 @@ namespace OpenSim.Services.S3AssetService
 
             foreach (var metadata in allAssets)
             {
+                if(metadata.Hash == null)
+                {
+                    // string hash = GetSHA256Hash(metadata.);
+                }
                 string hash = metadata.Hash; // O hash é o identificador do arquivo
                 string filePath = Path.Combine(fsBase, HashToFile(hash));
 

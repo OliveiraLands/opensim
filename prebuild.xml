@@ -610,10 +610,6 @@
 		  </Configuration>
 		  <Package name="AWSSDK.S3" version="3.7.0" />
 		  <ReferencePath>../../../bin/</ReferencePath>
-		  <ReferencePath>
-			  <Path>../../../bin/</Path>
-			  <Path>../packages/awssdk.s3/3.7.416.14/lib/net8.0</Path>
-		  </ReferencePath>
 		  <Reference name="AWSSDK.S3" />
 		  <Reference name="OpenMetaverseTypes"/>
 		  <Reference name="OpenMetaverse"/>
@@ -628,7 +624,9 @@
 		  <Reference name="OpenSim.Data"/>
 		  <Reference name="Nini"/>
 		  <Reference name="log4net"/>
-		  
+		  <PropertyGroup>
+			<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		   </PropertyGroup>
 	  </Project>
 
 	  <Project name="OpenSim.Services.AuthorizationService" path="OpenSim/Services/AuthorizationService" type="Library">
