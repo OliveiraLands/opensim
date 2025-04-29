@@ -609,8 +609,12 @@
 			  </Options>
 		  </Configuration>
 		  <Package name="AWSSDK.S3" version="3.7.0" />
+		  <Package name="StackExchange.Redis" version="2.8.31"/>
+		  <Package name="Newtonsoft.Json" version="13.0.3" />
 		  <ReferencePath>../../../bin/</ReferencePath>
 		  <Reference name="AWSSDK.S3" />
+		  <Reference name="StackExchange.Redis" />
+		  <Reference name="Newtonsoft.Json" />
 		  <Reference name="OpenMetaverseTypes"/>
 		  <Reference name="OpenMetaverse"/>
 		  <Reference name="OpenSim.Framework"/>

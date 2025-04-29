@@ -400,6 +400,11 @@ namespace OpenSim.Data.SQLite
             return DeleteAsset(assetID);
         }
 
+        public override List<AssetMetadata> GetAllAssets()
+        {
+            return FetchAssetMetadataSet(1, 999999999);
+        }
+
         #endregion
     }
 }

@@ -8,6 +8,8 @@
 using Amazon;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Newtonsoft.Json;
+using StackExchange.Redis;
 using log4net;
 using Nini.Config;
 using OpenMetaverse;
@@ -29,10 +31,13 @@ namespace OpenSim.Services.S3AssetService
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         protected IAssetLoader m_AssetLoader = null;
-        protected IFSAssetDataPlugin m_DataConnector = null;
+        protected IAssetDataPlugin m_DataConnector = null;
         protected IAssetService m_FallbackService;
         protected IAmazonS3 s3Client;
         protected string s3Bucket;
+
+        private ConnectionMultiplexer redis;
+        private IDatabase cacheDb;
 
         private static bool m_mainInitialized;
         private static object m_initLock = new object();
@@ -111,11 +116,11 @@ namespace OpenSim.Services.S3AssetService
             if (string.IsNullOrEmpty(connectionString))
                 throw new Exception("Missing database connection string");
 
-            m_DataConnector = LoadPlugin<IFSAssetDataPlugin>(dllName);
+            m_DataConnector = LoadPlugin<IAssetDataPlugin>(dllName);
             if (m_DataConnector == null)
                 throw new Exception(string.Format("Could not find a storage interface in the module {0}", dllName));
 
-            m_DataConnector.Initialise(connectionString, realm, SkipAccessTimeDays);
+            m_DataConnector.Initialise(connectionString);//, realm, SkipAccessTimeDays);
 
             // Configuração do serviço de fallback
             string str = assetConfig.GetString("FallbackService", string.Empty);
@@ -129,11 +134,21 @@ namespace OpenSim.Services.S3AssetService
                     m_log.Error("[S3ASSETS]: Failed to load fallback service");
             }
 
+            // Configura Redis
+            string redisConn = assetConfig.GetString("RedisConnection", string.Empty);
+            if (!string.IsNullOrEmpty(redisConn))
+            {
+                redis = ConnectionMultiplexer.Connect(redisConn);
+                cacheDb = redis.GetDatabase();
+                m_log.Info("[S3ASSETS]: Redis cache enabled");
+            }
+
             // Configuração do S3
             string s3AccessKey = assetConfig.GetString("S3AccessKey", string.Empty);
             string s3SecretKey = assetConfig.GetString("S3SecretKey", string.Empty);
             string s3Region = assetConfig.GetString("S3Region", "us-east-1");
             string S3ServiceURL = assetConfig.GetString("S3ServiceURL", null);
+
             s3Bucket = assetConfig.GetString("S3Bucket", string.Empty);
 
             if (string.IsNullOrEmpty(s3AccessKey) || string.IsNullOrEmpty(s3SecretKey) || string.IsNullOrEmpty(s3Bucket) 
@@ -165,14 +180,12 @@ namespace OpenSim.Services.S3AssetService
 
         public virtual bool[] AssetsExist(string[] ids)
         {
-            UUID[] uuid = Array.ConvertAll(ids, id => UUID.Parse(id));
-            return m_DataConnector.AssetsExist(uuid);
+            return m_DataConnector.AssetsExist(Array.ConvertAll(ids, UUID.Parse));
         }
 
         public virtual AssetBase Get(string id)
         {
-            string hash;
-            return Get(id, out hash);
+            return Get(id, out _);
         }
 
         public AssetBase Get(string id, string ForeignAssetService, bool dummy)
@@ -182,85 +195,99 @@ namespace OpenSim.Services.S3AssetService
 
         private AssetBase Get(string id, out string sha)
         {
-            string hash = string.Empty;
-            AssetMetadata metadata = m_DataConnector.Get(id, out hash);
-            sha = hash;
-
-            if (metadata == null)
+            sha = string.Empty;
+            // 1. Tenta Redis
+            if (cacheDb != null)
             {
-                AssetBase asset = null;
-                if (m_FallbackService != null)
+                var cachedData = cacheDb.StringGet(id + ":data");
+                var cachedMeta = cacheDb.StringGet(id + ":meta");
+                if (cachedData.HasValue && cachedMeta.HasValue)
                 {
-                    asset = m_FallbackService.Get(id);
-                    if (asset != null)
-                    {
-                        asset.Metadata.ContentType = SLUtil.SLAssetTypeToContentType((int)asset.Type);
-                        sha = GetSHA256Hash(asset.Data);
-                        m_log.InfoFormat("[S3ASSETS]: Added asset {0} from fallback to local store", id);
-                        Store(asset);
-                    }
+                    var meta = JsonConvert.DeserializeObject<AssetMetadata>(cachedMeta);
+                    sha = meta.Hash;
+                    return new AssetBase { Metadata = meta, Data = cachedData };
                 }
-                return asset;
             }
 
-            AssetBase newAsset = new AssetBase();
-            newAsset.Metadata = metadata;
+            // 2. Tenta S3 via DB lookup
+            AssetBase metadata;
+            string hash = "";
             try
             {
-                newAsset.Data = GetFsData(hash);
-                if (newAsset.Data.Length == 0)
-                {
-                    AssetBase asset = null;
-                    if (m_FallbackService != null)
-                    {
-                        asset = m_FallbackService.Get(id);
-                        if (asset != null)
-                        {
-                            asset.Metadata.ContentType = SLUtil.SLAssetTypeToContentType((int)asset.Type);
-                            sha = GetSHA256Hash(asset.Data);
-                            m_log.InfoFormat("[S3ASSETS]: Added asset {0} from fallback to local store", id);
-                            Store(asset);
-                        }
-                    }
-                    if (asset != null)
-                    {
-                        if (asset.Type == (int)AssetType.Object && asset.Data != null)
-                        {
-                            string xml = ExternalRepresentationUtils.SanitizeXml(Utils.BytesToString(asset.Data));
-                            asset.Data = Utils.StringToBytes(xml);
-                        }
-                        return asset;
-                    }
-                }
-
-                if (newAsset.Type == (int)AssetType.Object && newAsset.Data != null)
-                {
-                    string xml = ExternalRepresentationUtils.SanitizeXml(Utils.BytesToString(newAsset.Data));
-                    newAsset.Data = Utils.StringToBytes(xml);
-                }
-
-                return newAsset;
+                metadata = m_DataConnector.GetAsset(UUID.Parse(id));
             }
-            catch (Exception exception)
+            catch (Exception ex)
             {
-                m_log.Error(exception.ToString());
-                return null;
+                m_log.Warn($"Metadata lookup failed for {id}: {ex.Message}");
+                metadata = null;
             }
+
+            if (metadata != null)
+            {
+                sha = hash;
+                byte[] data = null;
+                try
+                {
+                    data = GetS3Data(hash);
+                }
+                catch (Exception ex)
+                {
+                    m_log.Warn($"S3 fetch failed for {id}: {ex.Message}");
+                    metadata = null;
+                }
+
+                if (metadata != null)
+                {
+                    var asset = new AssetBase { Metadata = metadata.Metadata, Data = data };
+                    if (asset.Type == (int)AssetType.Object)
+                    {
+                        string xml = ExternalRepresentationUtils.SanitizeXml(Utils.BytesToString(data));
+                        asset.Data = Utils.StringToBytes(xml);
+                    }
+                    // cache no Redis
+                    if (cacheDb != null)
+                    {
+                        // metadata.Hash = sha;
+                        cacheDb.StringSet(id + ":data", asset.Data, TimeSpan.FromMinutes(30));
+                        cacheDb.StringSet(id + ":meta", JsonConvert.SerializeObject(metadata), TimeSpan.FromMinutes(30));
+                    }
+                    return asset;
+                }
+            }
+
+            // 3. Fallback DB ou fallback service
+            try
+            {
+                // tenta do DB sem S3
+                var assetDb = m_DataConnector.GetAsset(UUID.Parse(id));
+                if (assetDb != null)
+                    return assetDb;
+            }
+            catch { }
+
+            if (m_FallbackService != null)
+            {
+                var assetFb = m_FallbackService.Get(id);
+                if (assetFb != null)
+                    return assetFb;
+            }
+
+            return null;
         }
 
         public virtual AssetMetadata GetMetadata(string id)
         {
-            string hash;
-            return m_DataConnector.Get(id, out hash);
+            return m_DataConnector.GetAsset(UUID.Parse(id)).Metadata;
         }
 
         public virtual byte[] GetData(string id)
         {
             string hash;
-            if (m_DataConnector.Get(id, out hash) == null)
+            AssetBase dbAsset = m_DataConnector.GetAsset(UUID.Parse(id));
+            if(dbAsset== null)
                 return null;
-
-            return GetFsData(hash);
+            hash = GetSHA256Hash(dbAsset.Data);
+            return GetS3Data(hash);
         }
 
         public bool Get(string id, Object sender, AssetRetrieved handler)
@@ -270,29 +297,16 @@ namespace OpenSim.Services.S3AssetService
             return true;
         }
 
-        public byte[] GetFsData(string hash)
+        private byte[] GetS3Data(string hash)
         {
-            try
+            using var response = s3Client.GetObjectAsync(new GetObjectRequest
             {
-                GetObjectRequest request = new GetObjectRequest
-                {
-                    BucketName = s3Bucket,
-                    Key = hash
-                };
-                using (GetObjectResponse response = s3Client.GetObjectAsync(request).Result)
-                using (Stream responseStream = response.ResponseStream)
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    responseStream.CopyTo(ms);
-                    return ms.ToArray();
-                }
-            }
-            catch (AmazonS3Exception ex)
-            {
-                if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-                    return Array.Empty<byte>();
-                throw;
-            }
+                BucketName = s3Bucket,
+                Key = hash
+            }).Result;
+            using var ms = new MemoryStream();
+            response.ResponseStream.CopyTo(ms);
+            return ms.ToArray();
         }
 
         public virtual string Store(AssetBase asset)
@@ -334,7 +348,7 @@ namespace OpenSim.Services.S3AssetService
                 }
             }
 
-            if (!m_DataConnector.Store(asset.Metadata, hash))
+            if (!m_DataConnector.StoreAsset(asset))
             {
                 if (asset.Metadata.Type == -2)
                     return asset.ID;
@@ -349,17 +363,8 @@ namespace OpenSim.Services.S3AssetService
 
         private bool S3ObjectExists(string hash)
         {
-            try
-            {
-                var result = s3Client.GetObjectMetadataAsync(s3Bucket, hash).Result;
-                return true;
-            }
-            catch (AmazonS3Exception ex)
-            {
-                if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-                    return false;
-                throw;
-            }
+            try { s3Client.GetObjectMetadataAsync(s3Bucket, hash).Wait(); return true; }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { return false; }
         }
 
         public bool UpdateContent(string id, byte[] data)
@@ -375,7 +380,7 @@ namespace OpenSim.Services.S3AssetService
 
         private void HandleShowAssets(string module, string[] args)
         {
-            int num = m_DataConnector.Count();
+            int num = 0;// m_DataConnector.;
             MainConsole.Instance.Output(string.Format("Total asset count: {0}", num));
         }
 
