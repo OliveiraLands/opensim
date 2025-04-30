@@ -83,11 +83,11 @@ namespace OpenSim.Services.S3AssetService
                             "Import legacy assets, overwriting current content",
                             HandleImportAssets);
                     MainConsole.Instance.Commands.AddCommand("s3", false,
-                        "migrate to s3", "migrate to s3", "Migrate all assets from filesystem to S3",
+                        "migrate to s3", "migrate to s3", "Migrate all assets from database to S3",
                         HandleMigrateToS3);
                     MainConsole.Instance.Commands.AddCommand("s3", false,
-                        "migrate to fs", "migrate to db", "Migrate all assets from S3 to database",
-                        HandleMigrateToFS);
+                        "migrate to db", "migrate to db", "Migrate all assets from S3 to database",
+                        HandleMigrateToDB);
                 }
                 else
                 {
@@ -548,7 +548,7 @@ namespace OpenSim.Services.S3AssetService
 
             MainConsole.Instance.Output($"Migration to S3 completed. Migrated: {migratedCount}, Failed: {failedCount}");
         }
-        private void HandleMigrateToFS(string module, string[] args)
+        private void HandleMigrateToDB(string module, string[] args)
         {
             int migratedCount = 0;
             int failedCount = 0;
@@ -584,7 +584,7 @@ namespace OpenSim.Services.S3AssetService
                         using (MemoryStream memoryStream = new MemoryStream())
                         {
                             responseStream.CopyTo(memoryStream);
-                            asset.Data = memoryStream.ToArray();
+                            assetBase.Data = memoryStream.ToArray();
                         }
                         m_DataConnector.StoreAsset(assetBase);
                     }
@@ -610,7 +610,7 @@ namespace OpenSim.Services.S3AssetService
                 }
             }
 
-            MainConsole.Instance.Output($"Migration to FS completed. Migrated: {migratedCount}, Failed: {failedCount}");
+            MainConsole.Instance.Output($"Migration to DB completed. Migrated: {migratedCount}, Failed: {failedCount}");
         }
         private string HashToFile(string hash)
         {
