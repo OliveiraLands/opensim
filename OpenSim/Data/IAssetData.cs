@@ -39,7 +39,5 @@ namespace OpenSim.Data
         List<AssetMetadata> FetchAssetMetadataSet(int start, int count);
         void Initialise(string connect);
         bool Delete(string id);
-
-        List<AssetMetadata> GetAllAssets();
     }
 }

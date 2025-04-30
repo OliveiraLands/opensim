@@ -362,11 +362,6 @@ namespace OpenSim.Data.MySQL
             return true;
         }
 
-        public override List<AssetMetadata> GetAllAssets()
-        {
-            return FetchAssetMetadataSet(1, 999999999);
-        }
-
         #endregion
     }
 }

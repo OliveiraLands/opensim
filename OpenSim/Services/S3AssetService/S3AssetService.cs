@@ -64,29 +64,29 @@ namespace OpenSim.Services.S3AssetService
                     m_mainInitialized = true;
                     m_isMainInstance = !assetConfig.GetBoolean("SecondaryInstance", false);
 
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "show assets", "show assets", "Show asset stats",
                             HandleShowAssets);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "show digest", "show digest <ID>", "Show asset digest",
                             HandleShowDigest);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "delete asset", "delete asset <ID>",
                             "Delete asset from database",
                             HandleDeleteAsset);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "import", "import <conn> <table> [<start> <count>]",
                             "Import legacy assets",
                             HandleImportAssets);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "force import", "force import <conn> <table> [<start> <count>]",
                             "Import legacy assets, overwriting current content",
                             HandleImportAssets);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
                         "migrate to s3", "migrate to s3", "Migrate all assets from filesystem to S3",
                         HandleMigrateToS3);
-                    MainConsole.Instance.Commands.AddCommand("fs", false,
-                        "migrate to fs", "migrate to fs", "Migrate all assets from S3 to filesystem",
+                    MainConsole.Instance.Commands.AddCommand("s3", false,
+                        "migrate to fs", "migrate to db", "Migrate all assets from S3 to database",
                         HandleMigrateToFS);
                 }
                 else
@@ -151,7 +151,7 @@ namespace OpenSim.Services.S3AssetService
 
             s3Bucket = assetConfig.GetString("S3Bucket", string.Empty);
 
-            if (string.IsNullOrEmpty(s3AccessKey) || string.IsNullOrEmpty(s3SecretKey) || string.IsNullOrEmpty(s3Bucket) 
+            if (string.IsNullOrEmpty(s3AccessKey) || string.IsNullOrEmpty(s3SecretKey) || string.IsNullOrEmpty(s3Bucket)
                 || string.IsNullOrEmpty(S3ServiceURL))
                 throw new Exception("Missing S3 configuration");
 
@@ -284,7 +284,7 @@ namespace OpenSim.Services.S3AssetService
         {
             string hash;
             AssetBase dbAsset = m_DataConnector.GetAsset(UUID.Parse(id));
-            if(dbAsset== null)
+            if (dbAsset == null)
                 return null;
             hash = GetSHA256Hash(dbAsset.Data);
             return GetS3Data(hash);
@@ -499,64 +499,9 @@ namespace OpenSim.Services.S3AssetService
 
             return BitConverter.ToString(hash).Replace("-", String.Empty);
         }
-        
-        
+
+
         private void HandleMigrateToS3(string module, string[] args)
-        {
-            string fsBase =  assetConfig.GetString("BaseDirectory", string.Empty);
-            if (string.IsNullOrEmpty(fsBase))
-            {
-                MainConsole.Instance.Output("BaseDirectory not specified in configuration.");
-                return;
-            }
-
-            int migratedCount = 0;
-            int failedCount = 0;
-
-            // Obter todos os metadados dos assets
-            List<AssetMetadata> allAssets = m_DataConnector.GetAllAssets();
-
-            foreach (var metadata in allAssets)
-            {
-                if(metadata.Hash == null)
-                {
-                    // string hash = GetSHA256Hash(metadata.);
-                }
-                string hash = metadata.Hash; // O hash é o identificador do arquivo
-                string filePath = Path.Combine(fsBase, HashToFile(hash));
-
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        byte[] data = File.ReadAllBytes(filePath);
-                        using (MemoryStream ms = new MemoryStream(data))
-                        {
-                            PutObjectRequest request = new PutObjectRequest
-                            {
-                                BucketName = s3Bucket,
-                                Key = hash,
-                                InputStream = ms
-                            };
-                            var resultPut = s3Client.PutObjectAsync(request).Result;
-                        }
-                        migratedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        m_log.Error($"Failed to migrate asset {metadata.ID} to S3: {ex.Message}");
-                        failedCount++;
-                    }
-                }
-                else
-                {
-                    m_log.Warn($"Asset file not found in FS: {filePath}");
-                }
-            }
-
-            MainConsole.Instance.Output($"Migration to S3 completed. Migrated: {migratedCount}, Failed: {failedCount}");
-        }
-        private void HandleMigrateToFS(string module, string[] args)
         {
             string fsBase = assetConfig.GetString("BaseDirectory", string.Empty);
             if (string.IsNullOrEmpty(fsBase))
@@ -569,12 +514,53 @@ namespace OpenSim.Services.S3AssetService
             int failedCount = 0;
 
             // Obter todos os metadados dos assets
-            List<AssetMetadata> allAssets = m_DataConnector.GetAllAssets();
+            List<AssetMetadata> allAssets = m_DataConnector.FetchAssetMetadataSet(0, 9999999);
 
             foreach (var metadata in allAssets)
             {
-                string hash = metadata.Hash; // O hash é a chave no S3
+                AssetBase asset = m_DataConnector.GetAsset(UUID.Parse(metadata.ID));
+
+                string hash = GetSHA256Hash(asset.Data); // O hash é a chave no S3
+
                 string filePath = Path.Combine(fsBase, HashToFile(hash));
+
+                try
+                {
+                    using (MemoryStream ms = new MemoryStream(asset.Data))
+                    {
+                        PutObjectRequest request = new PutObjectRequest
+                        {
+                            BucketName = s3Bucket,
+                            Key = hash,
+                            InputStream = ms
+                        };
+                        var resultPut = s3Client.PutObjectAsync(request).Result;
+                    }
+                    m_log.Info($"Migrated Asset: {asset.ID} - {asset.Name}");
+                    migratedCount++;
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error($"Failed to migrate asset {metadata.ID} to S3: {ex.Message}");
+                    failedCount++;
+                }
+            }
+
+            MainConsole.Instance.Output($"Migration to S3 completed. Migrated: {migratedCount}, Failed: {failedCount}");
+        }
+        private void HandleMigrateToFS(string module, string[] args)
+        {
+            int migratedCount = 0;
+            int failedCount = 0;
+
+            // Obter todos os metadados dos assets
+            List<AssetMetadata> allAssets = m_DataConnector.FetchAssetMetadataSet(0, 9999999);
+
+            foreach (var metadata in allAssets)
+            {
+                AssetBase asset = m_DataConnector.GetAsset(UUID.Parse(metadata.ID));
+
+                string hash = GetSHA256Hash(asset.Data); // O hash é a chave no S3
 
                 try
                 {
@@ -585,10 +571,24 @@ namespace OpenSim.Services.S3AssetService
                     };
                     using (GetObjectResponse response = s3Client.GetObjectAsync(request).Result)
                     using (Stream responseStream = response.ResponseStream)
-                    using (FileStream fs = new FileStream(filePath, FileMode.Create))
                     {
-                        responseStream.CopyTo(fs);
+                        AssetBase assetBase = new AssetBase();
+                        assetBase.Name = metadata.Name;
+                        assetBase.Flags = metadata.Flags;
+                        assetBase.CreatorID = metadata.CreatorID;
+                        assetBase.Description = metadata.Description;
+                        assetBase.ID = metadata.ID;
+                        assetBase.Metadata = metadata;
+                        assetBase.FullID = metadata.FullID;
+
+                        using (MemoryStream memoryStream = new MemoryStream())
+                        {
+                            responseStream.CopyTo(memoryStream);
+                            asset.Data = memoryStream.ToArray();
+                        }
+                        m_DataConnector.StoreAsset(assetBase);
                     }
+                    m_log.Info($"Migrated Asset: {asset.ID} - {asset.Name}");
                     migratedCount++;
                 }
                 catch (AmazonS3Exception ex)

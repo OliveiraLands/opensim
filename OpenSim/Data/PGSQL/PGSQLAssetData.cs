@@ -313,10 +313,6 @@ namespace OpenSim.Data.PGSQL
             return false;
         }
 
-        public override List<AssetMetadata> GetAllAssets()
-        {
-            return FetchAssetMetadataSet(1, 999999999);
-        }
         #endregion
     }
 }
