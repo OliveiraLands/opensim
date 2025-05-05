@@ -597,42 +597,6 @@
 
     </Project>
 
-	  <Project name="OpenSim.Services.S3AssetService" path="OpenSim/Services/S3AssetService" type="Library">
-		  <Configuration name="Debug">
-			  <Options>
-				  <OutputPath>../../../bin/</OutputPath>
-			  </Options>
-		  </Configuration>
-		  <Configuration name="Release">
-			  <Options>
-				  <OutputPath>../../../bin/</OutputPath>
-			  </Options>
-		  </Configuration>
-		  <Package name="AWSSDK.S3" version="3.7.0" />
-		  <Package name="StackExchange.Redis" version="2.8.31"/>
-		  <Package name="Newtonsoft.Json" version="13.0.3" />
-		  <ReferencePath>../../../bin/</ReferencePath>
-		  <Reference name="AWSSDK.S3" />
-		  <Reference name="StackExchange.Redis" />
-		  <Reference name="Newtonsoft.Json" />
-		  <Reference name="OpenMetaverseTypes"/>
-		  <Reference name="OpenMetaverse"/>
-		  <Reference name="OpenSim.Framework"/>
-		  <Reference name="OpenSim.Framework.Console"/>
-		  <Reference name="OpenSim.Framework.Serialization"/>
-		  <Reference name="OpenSim.Framework.Servers.HttpServer"/>
-		  <Reference name="OpenSim.Server.Base"/>
-		  <Reference name="OpenSim.Services.Interfaces"/>
-		  <Reference name="OpenSim.Services.Base"/>
-		  <Reference name="OpenSim.Services.Connectors"/>
-		  <Reference name="OpenSim.Data"/>
-		  <Reference name="Nini"/>
-		  <Reference name="log4net"/>
-		  <PropertyGroup>
-			<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-		   </PropertyGroup>
-	  </Project>
-
 	  <Project name="OpenSim.Services.AuthorizationService" path="OpenSim/Services/AuthorizationService" type="Library">
       <Configuration name="Debug">
         <Options>
