@@ -397,6 +397,25 @@ namespace OpenSim.DiscordNPCBridge
                                            "!status - Show bot status");
                     break;
 
+                case "!message":
+                    m_log.Info("[DiscordNPCBridge]: Executing message command");
+                    if (parts.Length >= 4)
+                    {
+                        string firstName = parts[1];
+                        string lastName = parts[2];
+                        string msg = string.Join(" ", parts.Skip(3));
+                        bool sent = SendPrivateMessage(firstName, lastName, msg);
+                        if (sent)
+                            await SendDiscordMessage($"Mensagem enviada para {firstName} {lastName}");
+                        else
+                            await SendDiscordMessage($"Falha ao enviar mensagem para {firstName} {lastName}: Avatar não encontrado");
+                    }
+                    else
+                    {
+                        await SendDiscordMessage("Uso: !message first last message");
+                    }
+                    break;
+
                 case "!recreate":
                     // Recreate NPC 
                     m_log.Info("[DiscordNPCBridge]: Executing recreate command");
@@ -479,6 +498,69 @@ namespace OpenSim.DiscordNPCBridge
                     await SendDiscordMessage($"Unknown command: {command}. Type !help for a list of commands.");
                     break;
             }
+        }
+
+        private bool SendPrivateMessage(string firstName, string lastName, string message)
+        {
+            string fullName = firstName + " " + lastName;
+            bool success = false;
+
+            // Percorre as cenas disponíveis
+            foreach (var scene in m_Scenes)
+            {
+                // Busca o avatar pelo nome
+                ScenePresence avatar = scene.GetScenePresences()
+                    .FirstOrDefault(p => p.Name.Equals(fullName, StringComparison.OrdinalIgnoreCase));
+
+                if (avatar != null)
+                {
+                    // Obtém o módulo de transferência de mensagens
+                    IMessageTransferModule messageTransfer = scene.RequestModuleInterface<IMessageTransferModule>();
+                    if (messageTransfer != null)
+                    {
+                        // Cria a mensagem instantânea
+                        GridInstantMessage im = new GridInstantMessage
+                        {
+                            fromAgentID =m_NPCUUID.Guid, // ID do remetente (ex.: NPC)
+                            fromAgentName = $"{m_NPCFirstName} {m_NPCLastName}", // Nome do remetente
+                            toAgentID = avatar.UUID.Guid, // ID do destinatário (avatar)
+                            dialog = (byte)InstantMessageDialog.MessageFromAgent, // Tipo de mensagem
+                            message = message, // Conteúdo da mensagem
+                            imSessionID= Guid.NewGuid(), // ID único da sessão
+                            timestamp = (uint)Util.UnixTimeSinceEpoch(), // Timestamp atual
+                            offline = 0, // Mensagem online
+                            Position = Vector3.Zero, // Posição (não relevante para IMs)
+                            binaryBucket= new byte[0] // Dados adicionais (vazio aqui)
+                        };
+
+                        // Envia a mensagem
+                        // Define o callback para o resultado
+                        MessageResultNotification resultCallback = (result) =>
+                        {
+                            if (result)
+                            {
+                                m_log.Info("Mensagem entregue com sucesso.");
+                                success = true;
+                            }
+                            else
+                            {
+                                m_log.Warn("Falha ao entregar a mensagem.");
+                                success = false;
+                            }
+                        };
+
+                        // Envia a mensagem com a notificação de resultado
+                        messageTransfer.SendInstantMessage(im, resultCallback);
+                        break; // Sai do loop após enviar
+                    }
+                    else
+                    {
+                        m_log.Error("Erro: Módulo de transferência de mensagens não encontrado.");
+                    }
+                }
+            }
+
+            return success;
         }
 
         private async void CloneNPC(string v1, string v2)
