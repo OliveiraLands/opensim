@@ -1287,6 +1287,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_Integer llListFindListNext(LSL_List src, LSL_List test, LSL_Integer instance)
+        {
+            return m_LSL_Functions.llListFindListNext(src, test, instance);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public LSL_Integer llListFindStrided(LSL_List src, LSL_List test, LSL_Integer lstart, LSL_Integer lend, LSL_Integer lstride)
         {
             return m_LSL_Functions.llListFindStrided(src, test, lstart, lend, lstride);
@@ -1656,6 +1662,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_Key llRequestAgentData(string id, int data)
         {
             return m_LSL_Functions.llRequestAgentData(id, data);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_List llGetVisualParams(string id, LSL_List visualparams)
+        {
+            return m_LSL_Functions.llGetVisualParams(id, visualparams);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2856,6 +2868,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_String llHMAC(LSL_String private_key, LSL_String message, LSL_String algo)
         {
             return m_LSL_Functions.llHMAC(private_key, message, algo);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public LSL_String llComputeHash(LSL_String message, LSL_String algo)
+        {
+            return m_LSL_Functions.llComputeHash(message, algo);
         }
 
     }
