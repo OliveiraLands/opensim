@@ -600,7 +600,6 @@ namespace OpenSim.DiscordNPCBridge
 
                 IAvatarService avatarService = scene.RequestModuleInterface<IAvatarService>();
                 AvatarAppearance appearance = null;
-
                 UUID ownerId = scene.RegionInfo.EstateSettings.EstateOwner;
                 string origimAppearence = "nowhere";
 
@@ -615,30 +614,45 @@ namespace OpenSim.DiscordNPCBridge
                         }
                         catch (Exception ex)
                         {
-                            m_log.Error($"[DiscordNPCBridge]: Error getting appearance. {ex.Message}");
+                            m_log.Error($"[DiscordNPCBridge]: Error getting appearance for UUID {m_CloneAVATAR}: {ex.Message}");
                         }
                     }
                     else
                     {
                         appearance = avatarService.GetAppearance(ownerId);
-                        origimAppearence = "cloned from state owner";
+                        origimAppearence = "cloned from estate owner";
+                    }
+
+                    // Adiciona log para verificar a aparência recuperada
+                    if (appearance != null)
+                    {
+                        m_log.Info($"[DiscordNPCBridge]: Appearance retrieved from {origimAppearence}. " +
+                                   $"Wearables count: {appearance.Wearables.Length}, Attachments count: {appearance.GetAttachments().Count}");
+                    }
+                    else
+                    {
+                        m_log.Warn($"[DiscordNPCBridge]: Appearance is null for {origimAppearence}, using default appearance");
+                        appearance = new AvatarAppearance();
                     }
                 }
                 else
                 {
+                    m_log.Warn("[DiscordNPCBridge]: AvatarService is null, using default appearance");
                     appearance = new AvatarAppearance();
                     origimAppearence = "nowhere (avatarService null)";
                 }
+
                 UUID ownerIdRoot = scene.RegionInfo.EstateSettings.EstateOwner;
 
                 m_NPCUUID = npcModule.CreateNPC(m_NPCFirstName,
                                                m_NPCLastName,
                                                m_NPCPosition,
-                                               ownerIdRoot, // Owner ID
-                                               true,      // Set as AI
-                                               scene, appearance);
+                                               ownerIdRoot,
+                                               true,
+                                               scene,
+                                               appearance);
 
-                m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID} and appearence {origimAppearence}");
+                m_log.Info($"[DiscordNPCBridge]: Created NPC {m_NPCFirstName} {m_NPCLastName} with UUID {m_NPCUUID} and appearance from {origimAppearence}");
 
                 m_NPCModules[m_NPCUUID] = npcModule;
                 m_NPCScenes[m_NPCUUID] = scene;
@@ -647,10 +661,8 @@ namespace OpenSim.DiscordNPCBridge
                 if (npcObj != null)
                     m_log.Info($"[DiscordNPCBridge]: NPC AbsolutePosition = {npcObj.AbsolutePosition}");
                 else
-                    m_log.Warn("[DiscordNPCBridge]: I couldn't find SceneObjectGroup for NPC after creaton!");
+                    m_log.Warn("[DiscordNPCBridge]: Couldn't find SceneObjectGroup for NPC after creation!");
 
-
-                // Say hello
                 npcModule.Say(m_NPCUUID, scene, "Discord Bridge NPC activated. I'm relaying messages between OpenSim and Discord.");
             }
             catch (Exception ex)
@@ -836,14 +848,10 @@ namespace OpenSim.DiscordNPCBridge
             if (!m_Enabled)
                 return;
 
-            // Ignore chat from the NPC itself
-            if (chat.Sender.AgentId.Equals(m_NPCUUID))
-                return;
-
-            // Check if the chat source is within range of the NPC
             Scene scene = (Scene)sender;
             ScenePresence npcPresence = null;
 
+            // Encontra o NPC na cena atual
             foreach (UUID npcId in m_NPCModules.Keys)
             {
                 if (m_NPCScenes.TryGetValue(npcId, out Scene npcScene) && npcScene == scene)
@@ -856,19 +864,20 @@ namespace OpenSim.DiscordNPCBridge
             if (npcPresence == null)
                 return;
 
-            // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.Sender.AgentId}, Type={chat.Type}, Message='{chat.Message}'");
+            // Ignora mensagens enviadas pelo próprio NPC da cena
+            if (chat.Sender.AgentId.Equals(npcPresence.UUID))
+                return;
 
-
-            // Get the chat senderPresence
+            // Obtém o remetente da mensagem
             ScenePresence senderPresence = scene.GetScenePresence(chat.Sender.AgentId);
             if (senderPresence == null)
                 return;
 
-            // Check if within range
+            // Verifica se o remetente está dentro do raio de escuta
             if (Vector3.Distance(npcPresence.AbsolutePosition, senderPresence.AbsolutePosition) > m_ListenRadius)
                 return;
 
-            // Only relay public chat or whispers to the NPC
+            // Relaya apenas mensagens públicas, sussurros ou gritos
             if (chat.Type == ChatTypeEnum.Say || chat.Type == ChatTypeEnum.Whisper || chat.Type == ChatTypeEnum.Shout)
             {
                 string message = $"{senderPresence.Name}: {chat.Message}";
@@ -882,13 +891,9 @@ namespace OpenSim.DiscordNPCBridge
             if (!m_Enabled)
                 return;
 
-            // Ignore chat from the NPC itself
-            if (chat.Sender.Equals(m_NPCUUID))
-                return;
-
             // Only process object chat
-            // if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper)
-            //    return;
+             if (chat.Type != ChatTypeEnum.Say && chat.Type != ChatTypeEnum.Whisper && chat.Type != ChatTypeEnum.Shout)
+                return;
             
             // m_log.Info($"[DiscordNPCBridge]: OnChatFromClient fired — Sender={chat.SenderUUID}, Type={chat.Type}, Message='{chat.Message}'");
 
@@ -906,6 +911,10 @@ namespace OpenSim.DiscordNPCBridge
 
             if (npcPresence == null)
                 return;
+
+            // Ignora mensagens enviadas pelo próprio NPC da cena
+            if (chat.Sender.AgentId.Equals(npcPresence.UUID))
+                return; ;
 
             // Get the object position
             SceneObjectPart part = scene.GetSceneObjectPart(chat.SenderUUID);
