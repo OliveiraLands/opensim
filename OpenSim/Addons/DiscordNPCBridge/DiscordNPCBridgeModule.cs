@@ -739,13 +739,15 @@ namespace OpenSim.DiscordNPCBridge
                 m_NPCModules[m_NPCUUID] = npcModule;
                 m_NPCScenes[m_NPCUUID] = scene;
 
+                npcModule.SetNPCAppearance(m_NPCUUID, appearance, scene);
+
                 SceneObjectGroup npcObj = scene.GetSceneObjectGroup(m_NPCUUID);
                 if (npcObj != null)
                     m_log.Info($"[DiscordNPCBridge]: NPC AbsolutePosition = {npcObj.AbsolutePosition}");
                 else
                     m_log.Warn("[DiscordNPCBridge]: Couldn't find SceneObjectGroup for NPC after creation!");
 
-                npcModule.Say(m_NPCUUID, scene, "Discord Bridge NPC activated. I'm relaying messages between OpenSim and Discord.");
+                npcModule.Say(m_NPCUUID, scene, "Discord Bridge NPC activated. I'm here to listen and answer your questions.");
             }
             catch (Exception ex)
             {
