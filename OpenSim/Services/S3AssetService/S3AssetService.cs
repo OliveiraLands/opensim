@@ -201,7 +201,7 @@ namespace OpenSim.Services.S3AssetService
             {
                 var cachedData = cacheDb.StringGet(id + ":data");
                 var cachedMeta = cacheDb.StringGet(id + ":meta");
-                if (cachedData.HasValue && cachedMeta.HasValue)
+                if (!cachedData.IsNullOrEmpty && !!cachedMeta.IsNullOrEmpty)
                 {
                     var meta = JsonConvert.DeserializeObject<AssetMetadata>(cachedMeta);
                     sha = meta.Hash;
