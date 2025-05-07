@@ -115,3 +115,12 @@ project can always be found at http://opensimulator.org.
 
 Thanks for trying OpenSim, we hope it is a pleasant experience.
 
+
+# Aditional modules (From Oliveira Lands) https://oliveiralands.com
+
+OpenSim.Addons.DiscordNPCBridge
+ * Connect a Discord Channel to NPC Player in the region allowing bidiretional conversation between
+   resdents and discord users
+
+OpenSim.Services.S3AssetService
+ * Asset server using AWS S3 server to store assets and Redis to cache delivery
