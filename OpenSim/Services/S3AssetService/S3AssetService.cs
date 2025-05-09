@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace OpenSim.Services.S3AssetService
 {
@@ -35,6 +36,7 @@ namespace OpenSim.Services.S3AssetService
         protected IAssetService m_FallbackService;
         protected IAmazonS3 s3Client;
         protected string s3Bucket;
+        private bool m_asyncWrite = false;
 
         private ConnectionMultiplexer redis;
         private IDatabase cacheDb;
@@ -99,6 +101,7 @@ namespace OpenSim.Services.S3AssetService
             string dllName = assetConfig.GetString("StorageProvider", string.Empty);
             string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
             string realm = assetConfig.GetString("Realm", "s3assets");
+            m_asyncWrite = assetConfig.GetBoolean("S3AsyncWrite", false);
 
             int SkipAccessTimeDays = assetConfig.GetInt("DaysBetweenAccessTimeUpdates", 0);
 
@@ -313,17 +316,30 @@ namespace OpenSim.Services.S3AssetService
         {
             string hash = GetSHA256Hash(asset.Data);
 
-            if (!S3ObjectExists(hash))
+            if (!S3ObjectExistsAsync(hash).Result)
             {
-                using (MemoryStream ms = new MemoryStream(asset.Data))
+                MemoryStream msCopy = new MemoryStream(asset.Data); // precisa manter o stream vivo fora do escopo
+
+                PutObjectRequest request = new PutObjectRequest
                 {
-                    PutObjectRequest request = new PutObjectRequest
+                    BucketName = s3Bucket,
+                    Key = hash,
+                    InputStream = msCopy
+                };
+
+                if (m_asyncWrite)
+                {
+                    _ = s3Client.PutObjectAsync(request).ContinueWith(task =>
                     {
-                        BucketName = s3Bucket,
-                        Key = hash,
-                        InputStream = ms
-                    };
-                    var result = s3Client.PutObjectAsync(request).Result;
+                        if (task.IsFaulted)
+                            m_log.Warn($"[S3ASSETS]: Failed async write for {hash}: {task.Exception?.GetBaseException().Message}");
+                        msCopy.Dispose(); // liberar memória
+                    });
+                }
+                else
+                {
+                    s3Client.PutObjectAsync(request).GetAwaiter().GetResult();
+                    msCopy.Dispose();
                 }
             }
 
@@ -361,10 +377,17 @@ namespace OpenSim.Services.S3AssetService
             }
         }
 
-        private bool S3ObjectExists(string hash)
+        private async Task<bool> S3ObjectExistsAsync(string hash)
         {
-            try { s3Client.GetObjectMetadataAsync(s3Bucket, hash).Wait(); return true; }
-            catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { return false; }
+            try
+            {
+                await s3Client.GetObjectMetadataAsync(s3Bucket, hash);
+                return true;
+            }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return false;
+            }
         }
 
         public bool UpdateContent(string id, byte[] data)
@@ -503,13 +526,6 @@ namespace OpenSim.Services.S3AssetService
 
         private void HandleMigrateToS3(string module, string[] args)
         {
-            string fsBase = assetConfig.GetString("BaseDirectory", string.Empty);
-            if (string.IsNullOrEmpty(fsBase))
-            {
-                MainConsole.Instance.Output("BaseDirectory not specified in configuration.");
-                return;
-            }
-
             int migratedCount = 0;
             int failedCount = 0;
 
@@ -522,7 +538,7 @@ namespace OpenSim.Services.S3AssetService
 
                 string hash = GetSHA256Hash(asset.Data); // O hash é a chave no S3
 
-                string filePath = Path.Combine(fsBase, HashToFile(hash));
+                //string filePath = Path.Combine(fsBase, HashToFile(hash));
 
                 try
                 {
