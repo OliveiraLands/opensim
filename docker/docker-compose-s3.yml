@@ -15,7 +15,8 @@ services:
       - monitor-net
 
   redis:
-    image: redis:latest
+#    image: redis:latest
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     container_name: redis
     ports:
       - "6379:6379"

@@ -1344,7 +1344,7 @@
 
 [DiscordNPCBridge]
     ;; Enable or disable the Discord NPC Bridge module
-    Enabled = true
+    Enabled = false
     
     ;; Discord bot token (obtenha em https://discord.com/developers/applications)
     DiscordToken = "SEU_TOKEN_AQUI"

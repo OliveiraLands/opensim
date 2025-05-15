@@ -283,6 +283,9 @@
     ; Default is false.
     AllowRemoteDeleteAllTypes = false
 
+    ;; RedisConnection
+    ;; RedisConnection = "http://127.0.0.1:6379"
+
     ; S3 configuration to use with S3AssetService.dll:S3AssetConnector
     ;
     ; S3AccessKey = "YOUR_ACCESS_KEY"

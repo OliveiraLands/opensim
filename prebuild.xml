@@ -48,8 +48,11 @@
 			</Match>
 			<Match pattern="runprebuild.sh" recurse="false">
 			</Match>
+			<Match pattern="docker/docker-compose-s3.yml" recurse="false">
+			</Match>
+			<Match pattern="docker/prometheus.yml" recurse="false">
+			</Match>
 		</Files>
-
 
 		<Project name="SmartThreadPool" path="ThirdParty/SmartThreadPool" type="Library">
 			<Configuration name="Debug">
