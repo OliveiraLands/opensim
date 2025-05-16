@@ -256,6 +256,31 @@ namespace OpenSim.Framework
         {
             return FullID.ToString();
         }
+
+        public string Hash
+        {
+            get { 
+                if (m_metadata.Hash == null || m_metadata.Hash == "")
+                {
+                    if (m_data != null)
+                        m_metadata.Hash = GetSHA256Hash(m_data);
+                    else
+                        m_metadata.Hash = "";
+                }
+                return m_metadata.Hash; 
+            }
+            set { m_metadata.Hash = value ?? ""; }
+        }
+
+        private string GetSHA256Hash(byte[] data)
+        {
+            byte[] hash;
+            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+                hash = sha.ComputeHash(data);
+
+            return BitConverter.ToString(hash).Replace("-", String.Empty);
+        }
+
     }
 
     [Serializable]

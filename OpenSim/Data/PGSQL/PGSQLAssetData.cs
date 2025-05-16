@@ -138,6 +138,7 @@ namespace OpenSim.Data.PGSQL
                         asset.Temporary = Convert.ToBoolean(reader["temporary"]);
                         asset.Flags = (AssetFlags)(Convert.ToInt32(reader["asset_flags"]));
                         asset.Data = (byte[])reader["data"];
+                        asset.Hash = (string)(reader["hash"] == DBNull.Value ? "" : reader["hash"]);
                         return asset;
                     }
                     return null; // throw new Exception("No rows to return");
@@ -154,14 +155,14 @@ namespace OpenSim.Data.PGSQL
 
             string sql =
                 @"UPDATE assets set name = :name, description = :description, " + "\"assetType\" " + @" = :assetType,
-                         local = :local, temporary = :temporary, creatorid = :creatorid, data = :data
+                         local = :local, temporary = :temporary, creatorid = :creatorid, data = :data, hash = :hash,
                     WHERE id=:id;
 
                   INSERT INTO assets
                     (id, name, description, " + "\"assetType\" " + @", local,
-                     temporary, create_time, access_time, creatorid, asset_flags, data)
+                     temporary, create_time, access_time, creatorid, asset_flags, data, hash)
                   Select :id, :name, :description, :assetType, :local,
-                         :temporary, :create_time, :access_time, :creatorid, :asset_flags, :data
+                         :temporary, :create_time, :access_time, :creatorid, :asset_flags, :data, :hash
                    Where not EXISTS(SELECT * FROM assets WHERE id=:id)
                 ";
 
@@ -198,6 +199,7 @@ namespace OpenSim.Data.PGSQL
                 command.Parameters.Add(m_database.CreateParameter("asset_flags", (int)asset.Flags));
                 command.Parameters.Add(m_database.CreateParameter("creatorid", asset.Metadata.CreatorID));
                 command.Parameters.Add(m_database.CreateParameter("data", asset.Data));
+                command.Parameters.Add(m_database.CreateParameter("hash", asset.Hash));
                 conn.Open();
                 try
                 {
@@ -277,7 +279,7 @@ namespace OpenSim.Data.PGSQL
         public override List<AssetMetadata> FetchAssetMetadataSet(int start, int count)
         {
             List<AssetMetadata> retList = new List<AssetMetadata>(count);
-            string sql = @" SELECT id, name, description, " + "\"assetType\"" + @", temporary, creatorid
+            string sql = @" SELECT id, name, description, " + "\"assetType\"" + @", temporary, creatorid, hash
                               FROM assets
                              order by id
                              limit :stop
@@ -300,6 +302,7 @@ namespace OpenSim.Data.PGSQL
                         metadata.Type = Convert.ToSByte(reader["assetType"]);
                         metadata.Temporary = Convert.ToBoolean(reader["temporary"]);
                         metadata.CreatorID = (string)reader["creatorid"];
+                        metadata.Hash = (reader["hash"] == DBNull.Value ? "":(string)reader["hash"]);
                         retList.Add(metadata);
                     }
                 }

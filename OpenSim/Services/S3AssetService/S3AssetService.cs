@@ -77,7 +77,7 @@ namespace OpenSim.Services.S3AssetService
                             "delete asset", "delete asset <ID>",
                             "Delete asset from database",
                             HandleDeleteAsset);
-                    MainConsole.Instance.Commands.AddCommand("s3", false,
+/*                    MainConsole.Instance.Commands.AddCommand("s3", false,
                             "import", "import <conn> <table> [<start> <count>]",
                             "Import legacy assets",
                             HandleImportAssets);
@@ -85,6 +85,7 @@ namespace OpenSim.Services.S3AssetService
                             "force import", "force import <conn> <table> [<start> <count>]",
                             "Import legacy assets, overwriting current content",
                             HandleImportAssets);
+*/
                     MainConsole.Instance.Commands.AddCommand("s3", false,
                         "migrate to s3", "migrate to s3 [--force]", "Migrate all assets from database to S3",
                         HandleMigrateToS3);
@@ -101,7 +102,8 @@ namespace OpenSim.Services.S3AssetService
             // Configuração do banco de dados
             string dllName = assetConfig.GetString("StorageProvider", string.Empty);
             string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
-            string realm = assetConfig.GetString("Realm", "s3assets");
+            string realm = assetConfig.GetString("Realm", "fsassets");
+
             m_asyncWrite = assetConfig.GetBoolean("S3AsyncWrite", false);
 
             int SkipAccessTimeDays = assetConfig.GetInt("DaysBetweenAccessTimeUpdates", 0);
@@ -203,7 +205,6 @@ namespace OpenSim.Services.S3AssetService
                 return redisAsset;
             }
 
-
             // 2. Tenta S3 via DB lookup
             AssetBase metadata;
             string hash = "";
@@ -221,6 +222,12 @@ namespace OpenSim.Services.S3AssetService
             {
                 sha = metadata.Metadata.Hash; // hash;
                 hash = sha;
+                if (string.IsNullOrEmpty(hash))
+                {
+                    hash = GetSHA256Hash(metadata.Data);
+                    metadata.Hash = hash;
+                    metadata.Metadata.Hash= hash;
+                }
                 byte[] data = null;
                 try
                 {
@@ -305,6 +312,7 @@ namespace OpenSim.Services.S3AssetService
             string hash = GetSHA256Hash(asset.Data);
 
             asset.Metadata.Hash = hash;
+            asset.Hash = hash;
 
             if (!S3ObjectExistsAsync(hash).Result)
             {
@@ -393,7 +401,7 @@ namespace OpenSim.Services.S3AssetService
 
         private void HandleShowAssets(string module, string[] args)
         {
-            int num = 0;// m_DataConnector.;
+            int num = 0; // m_DataConnector.c
             MainConsole.Instance.Output(string.Format("Total asset count: {0}", num));
         }
 
@@ -517,10 +525,14 @@ namespace OpenSim.Services.S3AssetService
         private void HandleMigrateToS3(string module, string[] args)
         {
             bool force = false;
-            if (args.Length > 1 && args[1] == "--force")
+            foreach (string s in args)
             {
-                force = true;
-                m_log.Info("[S3ASSETS]: Forced migration mode enabled - will overwrite existing assets in S3");
+                if (s == "--force")
+                {
+                    force = true;
+                    m_log.Info("[S3ASSETS]: Forced migration mode enabled - will overwrite existing assets in S3");
+                    break;
+                }
             }
 
             int migratedCount = 0;
@@ -582,10 +594,14 @@ namespace OpenSim.Services.S3AssetService
         private void HandleMigrateToDB(string module, string[] args)
         {
             bool force = false;
-            if (args.Length > 1 && args[1] == "--force")
+            foreach (string s in args)
             {
-                force = true;
-                m_log.Info("[S3ASSETS]: Forced migration mode enabled - will overwrite existing assets in DB");
+                if (s == "--force")
+                {
+                    force = true;
+                    m_log.Info("[S3ASSETS]: Forced migration mode enabled - will overwrite existing assets in DB");
+                    break;
+                }
             }
 
             int migratedCount = 0;
@@ -644,6 +660,7 @@ namespace OpenSim.Services.S3AssetService
                         assetBase.ID = metadata.ID;
                         assetBase.Metadata = metadata;
                         assetBase.FullID = metadata.FullID;
+                        assetBase.Hash = hash;
 
                         using (MemoryStream memoryStream = new MemoryStream())
                         {

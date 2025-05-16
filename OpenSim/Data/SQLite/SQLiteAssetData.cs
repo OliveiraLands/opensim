@@ -49,10 +49,10 @@ namespace OpenSim.Data.SQLite
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private const string SelectAssetSQL = "select * from assets where UUID=:UUID";
-        private const string SelectAssetMetadataSQL = "select Name, Description, Type, Temporary, asset_flags, UUID, CreatorID from assets limit :start, :count";
+        private const string SelectAssetMetadataSQL = "select Name, Description, Type, Temporary, asset_flags, UUID, CreatorID,hash from assets limit :start, :count";
         private const string DeleteAssetSQL = "delete from assets where UUID=:UUID";
-        private const string InsertAssetSQL = "insert into assets(UUID, Name, Description, Type, Local, Temporary, asset_flags, CreatorID, Data) values(:UUID, :Name, :Description, :Type, :Local, :Temporary, :Flags, :CreatorID, :Data)";
-        private const string UpdateAssetSQL = "update assets set Name=:Name, Description=:Description, Type=:Type, Local=:Local, Temporary=:Temporary, asset_flags=:Flags, CreatorID=:CreatorID, Data=:Data where UUID=:UUID";
+        private const string InsertAssetSQL = "insert into assets(UUID, Name, Description, Type, Local, Temporary, asset_flags, CreatorID, Data, hash) values(:UUID, :Name, :Description, :Type, :Local, :Temporary, :Flags, :CreatorID, :Data, :hash)";
+        private const string UpdateAssetSQL = "update assets set Name=:Name, Description=:Description, Type=:Type, Local=:Local, Temporary=:Temporary, asset_flags=:Flags, CreatorID=:CreatorID, Data=:Data, Hash=:hash where UUID=:UUID";
         private const string assetSelect = "select * from assets";
 
         private SqliteConnection m_conn;
@@ -168,6 +168,7 @@ namespace OpenSim.Data.SQLite
                         cmd.Parameters.Add(new SqliteParameter(":Flags", asset.Flags));
                         cmd.Parameters.Add(new SqliteParameter(":CreatorID", asset.Metadata.CreatorID));
                         cmd.Parameters.Add(new SqliteParameter(":Data", asset.Data));
+                        cmd.Parameters.Add(new SqliteParameter(":hash", asset.Hash));
 
                         cmd.ExecuteNonQuery();
                         return true;
@@ -189,6 +190,7 @@ namespace OpenSim.Data.SQLite
                         cmd.Parameters.Add(new SqliteParameter(":Flags", asset.Flags));
                         cmd.Parameters.Add(new SqliteParameter(":CreatorID", asset.Metadata.CreatorID));
                         cmd.Parameters.Add(new SqliteParameter(":Data", asset.Data));
+                        cmd.Parameters.Add(new SqliteParameter(":hash", asset.Hash));
 
                         cmd.ExecuteNonQuery();
                         return true;
@@ -272,6 +274,7 @@ namespace OpenSim.Data.SQLite
             asset.Temporary = Convert.ToBoolean(row["Temporary"]);
             asset.Flags = (AssetFlags)Convert.ToInt32(row["asset_flags"]);
             asset.Data = (byte[])row["Data"];
+            asset.Hash = (row["hash"] == DBNull.Value ? "" : (string)row["hash"]);
             return asset;
         }
 
@@ -286,6 +289,7 @@ namespace OpenSim.Data.SQLite
             metadata.Temporary = Convert.ToBoolean(row["Temporary"]); // Not sure if this is correct.
             metadata.Flags = (AssetFlags)Convert.ToInt32(row["asset_flags"]);
             metadata.CreatorID = row["CreatorID"].ToString();
+            metadata.Hash = (row["hash"] == DBNull.Value ? "" : (string)row["hash"]);
 
             // Current SHA1s are not stored/computed.
             metadata.SHA1 = Array.Empty<byte>();
