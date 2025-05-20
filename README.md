@@ -1,4 +1,4 @@
-Welcome to OpenSimulator (OpenSim for short)!
+Welcome to OpenSimulator (OpenSim for short)! (Oliveira Lands Version)
 
 # Overview
 
