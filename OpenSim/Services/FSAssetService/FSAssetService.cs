@@ -26,6 +26,7 @@
  */
 
 using log4net;
+using Newtonsoft.Json;
 using Nini.Config;
 using OpenMetaverse;
 using OpenSim.Data;
@@ -33,12 +34,15 @@ using OpenSim.Framework;
 using OpenSim.Framework.Serialization.External;
 using OpenSim.Services.Base;
 using OpenSim.Services.Interfaces;
+using StackExchange.Redis;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 
 namespace OpenSim.Services.FSAssetService
@@ -79,6 +83,11 @@ namespace OpenSim.Services.FSAssetService
 
         private bool m_isMainInstance;
 
+        private IConfig assetConfig;
+
+        private ConnectionMultiplexer redis;
+        private IDatabase cacheDb;
+
         public FSAssetConnector(IConfigSource config)
             : this(config, "AssetService")
         {
@@ -86,7 +95,7 @@ namespace OpenSim.Services.FSAssetService
 
         public FSAssetConnector(IConfigSource config, string configName) : base(config)
         {
-            IConfig assetConfig = config.Configs[configName];
+            assetConfig = config.Configs[configName];
             if (assetConfig == null)
                 throw new Exception("No AssetService configuration");
 
@@ -115,6 +124,12 @@ namespace OpenSim.Services.FSAssetService
                             "force import", "force import <conn> <table> [<start> <count>]",
                             "Import legacy assets, overwriting current content",
                             HandleImportAssets);
+                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                        "migrate to fs", "migrate to fs [--force]", "Migrate all assets from database to FS",
+                        HandleMigrateToFS);
+                    MainConsole.Instance.Commands.AddCommand("fs", false,
+                        "migrate to db", "migrate to db [--force]", "Migrate all assets from FS to database",
+                        HandleMigrateToDB);
                 }
                 else
                 {
@@ -174,6 +189,11 @@ namespace OpenSim.Services.FSAssetService
                 }
             }
 
+            // Configura Redis
+            string redisConn = assetConfig.GetString("RedisConnection", string.Empty);
+
+            InitializeRedis(redisConn);
+
             // Setup directory structure including temp directory
             m_SpoolDirectory = assetConfig.GetString("SpoolDirectory", "/tmp");
 
@@ -202,13 +222,13 @@ namespace OpenSim.Services.FSAssetService
                     string loaderArgs = assetConfig.GetString("AssetLoaderArgs", string.Empty);
                     m_log.InfoFormat("[FSASSETS]: Loading default asset set from {0}", loaderArgs);
                     m_AssetLoader.ForEachDefaultXmlAsset(loaderArgs,
-                            delegate(AssetBase a)
+                            delegate (AssetBase a)
                             {
                                 Store(a, false);
                             });
                 }
 
-                if(m_WriterThread == null)
+                if (m_WriterThread == null)
                 {
                     m_WriterThread = new Thread(Writer);
                     m_WriterThread.Start();
@@ -235,8 +255,8 @@ namespace OpenSim.Services.FSAssetService
                     if (m_readCount > 0)
                     {
                         double avg = (double)m_readTicks / (double)m_readCount;
-//                        if (avg > 10000)
-//                            Environment.Exit(0);
+                        //                        if (avg > 10000)
+                        //                            Environment.Exit(0);
                         m_log.InfoFormat("[FSASSETS]: Read stats: {0} files, {1} ticks, avg {2:F2}, missing {3}, FS {4}", m_readCount, m_readTicks, (double)m_readTicks / (double)m_readCount, m_missingAssets, m_missingAssetsFS);
                     }
                     m_readCount = 0;
@@ -258,7 +278,7 @@ namespace OpenSim.Services.FSAssetService
                 if (files.Length > 0)
                 {
                     int tickCount = Environment.TickCount;
-                    for (int i = 0 ; i < files.Length ; i++)
+                    for (int i = 0; i < files.Length; i++)
                     {
                         string hash = Path.GetFileNameWithoutExtension(files[i]);
                         string s = HashToFile(hash);
@@ -266,7 +286,7 @@ namespace OpenSim.Services.FSAssetService
                         bool pathOk = false;
 
                         // The cure for chicken bones!
-                        while(true)
+                        while (true)
                         {
                             try
                             {
@@ -340,7 +360,7 @@ namespace OpenSim.Services.FSAssetService
 
                                 //File.Move(files[i], diskFile);
                             }
-                            catch(System.IO.IOException e)
+                            catch (System.IO.IOException e)
                             {
                                 if (e.Message.StartsWith("Win32 IO returned ERROR_ALREADY_EXISTS"))
                                     File.Delete(files[i]);
@@ -434,8 +454,16 @@ namespace OpenSim.Services.FSAssetService
 
         private AssetBase Get(string id, out string sha)
         {
-            string hash = string.Empty;
+            sha = string.Empty;
 
+            // 1. Tenta Redis
+            var redisAsset = GetFromRedis(id, out sha);
+            if (redisAsset != null)
+            {
+                return redisAsset;
+            }
+
+            string hash = string.Empty;
             int startTime = System.Environment.TickCount;
             AssetMetadata metadata;
 
@@ -705,6 +733,7 @@ namespace OpenSim.Services.FSAssetService
             }
             else
             {
+                StoreInRedis(asset.ID, asset, asset, hash);
                 return asset.ID;
             }
         }
@@ -713,19 +742,19 @@ namespace OpenSim.Services.FSAssetService
         {
             return false;
 
-//            string oldhash;
-//            AssetMetadata meta = m_DataConnector.Get(id, out oldhash);
-//
-//            if (meta == null)
-//                return false;
-//
-//            AssetBase asset = new AssetBase();
-//            asset.Metadata = meta;
-//            asset.Data = data;
-//
-//            Store(asset);
-//
-//            return true;
+            //            string oldhash;
+            //            AssetMetadata meta = m_DataConnector.Get(id, out oldhash);
+            //
+            //            if (meta == null)
+            //                return false;
+            //
+            //            AssetBase asset = new AssetBase();
+            //            asset.Metadata = meta;
+            //            asset.Data = data;
+            //
+            //            Store(asset);
+            //
+            //            return true;
         }
 
         public virtual bool Delete(string id)
@@ -767,7 +796,7 @@ namespace OpenSim.Services.FSAssetService
             MainConsole.Instance.Output(String.Format("Flags: {0}", asset.Metadata.Flags.ToString()));
             MainConsole.Instance.Output(String.Format("FS file: {0}", HashToFile(hash)));
 
-            for (i = 0 ; i < 5 ; i++)
+            for (i = 0; i < 5; i++)
             {
                 int off = i * 16;
                 if (asset.Data.Length <= off)
@@ -845,6 +874,297 @@ namespace OpenSim.Services.FSAssetService
         public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)
         {
             return;
+        }
+
+        private void HandleMigrateToFS(string module, string[] args)
+        {
+            bool force = false;
+            foreach (string s in args)
+            {
+                if (s == "--force")
+                {
+                    force = true;
+                    m_log.Info("[FSASSETS]: Forced migration mode enabled - will overwrite existing assets in FS");
+                    break;
+                }
+            }
+
+            int migratedCount = 0;
+            int failedCount = 0;
+            int skippedCount = 0;
+
+            // Obter todos os metadados dos assets
+            List<AssetMetadata> allAssets = m_DataConnector.GetAllAssets();
+
+            foreach (var metadata in allAssets)
+            {
+                AssetBase asset = m_FallbackService.Get(metadata.ID);
+
+                string hash = GetSHA256Hash(asset.Data); // O hash é a chave no FS
+
+                // Verifica se o asset já existe no S3 (a menos que esteja em modo force)
+                if (!force)
+                {
+                    try
+                    {
+                        bool exists = AssetExists(hash);
+                        if (exists)
+                        {
+                            m_log.Debug($"Asset {asset.ID} already exists in FS with hash {hash}, skipping");
+                            skippedCount++;
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        m_log.Warn($"Error checking if asset exists in FS: {ex.Message}");
+                    }
+                }
+
+                try
+                {
+                    Store(asset, true); // Armazena o asset no FS
+
+                    m_log.Info($"Migrated Asset: {asset.ID} - {asset.Name}");
+                    migratedCount++;
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error($"Failed to migrate asset {metadata.ID} to FS: {ex.Message}");
+                    failedCount++;
+                }
+            }
+
+            MainConsole.Instance.Output($"Migration to FS completed. Migrated: {migratedCount}, Skipped: {skippedCount}, Failed: {failedCount}");
+        }
+        private void HandleMigrateToDB(string module, string[] args)
+        {
+            bool force = false;
+            foreach (string s in args)
+            {
+                if (s == "--force")
+                {
+                    force = true;
+                    m_log.Info("[FSASSETS]: Forced migration mode enabled - will overwrite existing assets in DB");
+                    break;
+                }
+            }
+
+            int migratedCount = 0;
+            int skippedCount = 0;
+            int failedCount = 0;
+
+            // Obter todos os metadados dos assets
+            List<AssetMetadata> allAssets = m_DataConnector.GetAllAssets();
+            string hash= string.Empty;
+
+            foreach (var metadata in allAssets)
+            {
+                // Se não estiver em modo force, verifica se o asset já existe no banco com dados
+                if (!force)
+                {
+                    try
+                    {
+                        bool existingAsset = m_FallbackService.AssetsExist([metadata.ID]).Length==1;
+
+                        if (existingAsset)
+                        {
+                            m_log.Debug($"Asset {metadata.ID} already exists in DB with data, skipping");
+                            skippedCount++;
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        m_log.Warn($"Error checking if asset exists in DB: {ex.Message}");
+                    }
+                }
+
+                AssetBase asset = m_FallbackService.Get(metadata.ID);
+
+                if (asset == null)
+                {
+                    m_log.Warn($"Asset metadata {metadata.ID} not found in DB, skipping");
+                    skippedCount++;
+                    continue;
+                }
+
+                try
+                {
+                    m_FallbackService.Store(asset); // Armazena o asset no banco de dados
+                    m_log.Info($"Migrated Asset: {asset.ID} - {asset.Name}");
+                    migratedCount++;
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error($"Failed to migrate asset {metadata.ID} to DB: {ex.Message}");
+                    failedCount++;
+                }
+            }
+
+            MainConsole.Instance.Output($"Migration to DB completed. Migrated: {migratedCount}, Skipped: {skippedCount}, Failed: {failedCount}");
+        }
+        // Correção na inicialização do Redis
+        private void InitializeRedis(string redisConn)
+        {
+            if (string.IsNullOrEmpty(redisConn))
+                return;
+
+            // Remove o prefixo HTTP se presente
+            if (redisConn.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                redisConn = redisConn.Substring(7);
+                m_log.Warn($"[FSASSETS]: Removido prefixo 'http://' da string de conexão Redis: {redisConn}");
+            }
+            else if (redisConn.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                redisConn = redisConn.Substring(8);
+                m_log.Warn($"[FSASSETS]: Removido prefixo 'https://' da string de conexão Redis: {redisConn}");
+            }
+
+            try
+            {
+                // Usar ConfigurationOptions para maior controle
+                var options = new ConfigurationOptions
+                {
+                    AbortOnConnectFail = false,  // Não abortar se a conexão falhar inicialmente
+                    ConnectTimeout = 5000,       // 5 segundos de timeout de conexão
+                    SyncTimeout = 5000,          // 5 segundos de timeout para operações síncronas
+                    ConnectRetry = 3             // Tentar reconectar 3 vezes
+                };
+
+                // Adicionar endpoints
+                string[] endpoints = redisConn.Split(',');
+                foreach (var endpoint in endpoints)
+                {
+                    if (!endpoint.Contains("=")) // Não é um par chave=valor de configuração
+                    {
+                        options.EndPoints.Add(endpoint.Trim());
+                    }
+                }
+
+                // Processar outras opções como senha, se presentes na string
+                if (redisConn.Contains("password="))
+                {
+                    // ConfigurationOptions processará automaticamente estas opções
+                    // então passamos a string original para o método de conexão
+                    redis = ConnectionMultiplexer.Connect(redisConn);
+                }
+                else
+                {
+                    redis = ConnectionMultiplexer.Connect(options);
+                }
+
+                if (redis != null && redis.IsConnected)
+                {
+                    cacheDb = redis.GetDatabase();
+                    m_log.Info($"[FSASSETS]: Redis cache conectado com sucesso a {string.Join(", ", options.EndPoints)}");
+
+                    // Teste de comunicação simples com servidor
+                    string pingResult = cacheDb.Execute("PING").ToString();
+                    m_log.Info($"[FSASSETS]: Redis PING retornou: {pingResult}");
+                }
+                else
+                {
+                    if (redis != null)
+                    {
+                        // Obter informações sobre falhas de conexão
+                        var endpointStatus = redis.GetEndPoints().Select(e =>
+                        {
+                            var server = redis.GetServer(e);
+                            return $"{e}: {(server.IsConnected ? "Conectado" : "Desconectado")}";
+                        });
+
+                        m_log.Warn($"[FSASSETS]: Conexão Redis estabelecida, mas não está conectada. Estado: {string.Join(", ", endpointStatus)}");
+                    }
+                    else
+                    {
+                        m_log.Warn("[FSASSETS]: Falha ao criar conexão Redis");
+                    }
+
+                    redis?.Dispose();
+                    redis = null;
+                    cacheDb = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error($"[FSASSETS]: Erro de conexão Redis: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    m_log.Error($"[FSASSETS]: Erro interno: {ex.InnerException.Message}");
+                }
+                redis?.Dispose();
+                redis = null;
+                cacheDb = null;
+            }
+        }
+        // Correção na recuperação de dados do Redis
+        private AssetBase GetFromRedis(string id, out string sha)
+        {
+            sha = string.Empty;
+            if (cacheDb == null)
+                return null;
+
+            try
+            {
+                var cachedData = cacheDb.StringGet(id + ":data");
+                var cachedMeta = cacheDb.StringGet(id + ":meta");
+
+                if (!cachedData.IsNullOrEmpty && !cachedMeta.IsNullOrEmpty)
+                {
+                    try
+                    {
+                        var meta = JsonConvert.DeserializeObject<AssetMetadata>(cachedMeta);
+                        if (meta != null)
+                        {
+                            sha = meta.Hash ?? string.Empty;
+                            if (string.IsNullOrEmpty(sha))
+                            {
+                                sha = GetSHA256Hash(cachedData);
+                            }
+                            return new AssetBase { Metadata = meta, Data = cachedData };
+                        }
+                    }
+                    catch (System.Text.Json.JsonException jex)
+                    {
+                        m_log.Warn($"[FSASSETS]: Failed to deserialize Redis metadata for {id}: {jex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Warn($"[FSASSETS]: Redis retrieval error for {id}: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        // Correção na gravação de dados no Redis
+        private void StoreInRedis(string id, AssetBase asset, AssetBase metadata, string sha)
+        {
+            if (cacheDb == null || asset == null || asset.Data == null || metadata == null)
+                return;
+
+            try
+            {
+                // Adicionando hash ao metadata (se aplicável)
+                if (!string.IsNullOrEmpty(sha) && metadata.Metadata != null)
+                {
+                    metadata.Metadata.Hash = sha;
+                }
+
+                // Tempo de expiração configurável (usando valor padrão se não configurado)
+                int cacheMinutes = assetConfig?.GetInt("RedisCacheMinutes", 30) ?? 30;
+                TimeSpan expiry = TimeSpan.FromMinutes(cacheMinutes);
+
+                cacheDb.StringSet(id + ":data", asset.Data, expiry);
+                cacheDb.StringSet(id + ":meta", JsonConvert.SerializeObject(metadata), expiry);
+            }
+            catch (Exception ex)
+            {
+                m_log.Warn($"[FSASSETS]: Redis cache error for {id}: {ex.Message}");
+            }
         }
     }
 }

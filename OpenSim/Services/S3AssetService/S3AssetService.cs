@@ -371,6 +371,7 @@ namespace OpenSim.Services.S3AssetService
             }
             else
             {
+                StoreInRedis(asset.ID, asset, asset, hash);
                 return asset.ID;
             }
         }
