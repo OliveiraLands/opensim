@@ -40,7 +40,7 @@ using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     public class SQLiteUserProfilesData: IProfilesData
     {

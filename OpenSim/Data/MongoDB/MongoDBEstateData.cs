@@ -39,7 +39,7 @@ using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     public class SQLiteEstateStore : IEstateDataStore
     {

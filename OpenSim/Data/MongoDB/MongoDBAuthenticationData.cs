@@ -40,9 +40,9 @@ using OpenSim.Framework;
     using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteAuthenticationData : SQLiteFramework, IAuthenticationData
+    public class SQLiteAuthenticationData : MongoDBFramework, IAuthenticationData
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 

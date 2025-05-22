@@ -37,9 +37,9 @@ using OpenSim.Framework;
     using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteMuteListData : SQLiteGenericTableHandler<MuteData>, IMuteListData
+    public class SQLiteMuteListData : MongoDBGenericTableHandler<MuteData>, IMuteListData
     {
         public SQLiteMuteListData(string connectionString)
                 : base(connectionString, "MuteList", "MuteListStore")

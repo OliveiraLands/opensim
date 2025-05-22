@@ -38,7 +38,7 @@ using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A SQLite Interface for the Asset Server
@@ -293,7 +293,7 @@ namespace OpenSim.Data.SQLite
 
     }
 
-    public class SqliteInventoryHandler<T> : SQLiteGenericTableHandler<T> where T: class, new()
+    public class SqliteInventoryHandler<T> : MongoDBGenericTableHandler<T> where T: class, new()
     {
         public SqliteInventoryHandler(string c, string t, string m) : base(c, t, m) {}
 

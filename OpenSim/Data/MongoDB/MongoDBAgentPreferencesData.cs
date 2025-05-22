@@ -37,9 +37,9 @@ using OpenSim.Framework;
   using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteAgentPreferencesData : SQLiteGenericTableHandler<AgentPreferencesData>, IAgentPreferencesData
+    public class SQLiteAgentPreferencesData : MongoDBGenericTableHandler<AgentPreferencesData>, IAgentPreferencesData
     {
         public SQLiteAgentPreferencesData(string connectionString, string realm)
             : base(connectionString, realm, "AgentPrefs")

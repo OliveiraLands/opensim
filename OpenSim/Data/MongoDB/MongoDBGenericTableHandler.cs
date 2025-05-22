@@ -30,18 +30,15 @@ using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
 using log4net;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
-#else
-    using Mono.Data.Sqlite;
-#endif
 using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
+using MongoDB.Driver;
+using MongoDB.Bson;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteGenericTableHandler<T> : SQLiteFramework where T: class, new()
+    public class MongoDBGenericTableHandler<T> : MongoDBFramework where T: class, new()
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
@@ -60,7 +57,7 @@ namespace OpenSim.Data.SQLite
             get { return GetType().Assembly; }
         }
 
-        public SQLiteGenericTableHandler(string connectionString,
+        public MongoDBGenericTableHandler(string connectionString,
                 string realm, string storeName) : base(connectionString)
         {
             m_Realm = realm;

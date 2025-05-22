@@ -39,12 +39,12 @@ using OpenSim.Framework;
     using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A SQLite Interface for Avatar Data
     /// </summary>
-    public class SQLiteAvatarData : SQLiteGenericTableHandler<AvatarBaseData>,
+    public class SQLiteAvatarData : MongoDBGenericTableHandler<AvatarBaseData>,
             IAvatarData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);

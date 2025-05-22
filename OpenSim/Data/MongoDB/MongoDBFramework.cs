@@ -37,16 +37,16 @@ using OpenSim.Framework;
     using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A database interface class to a user profile storage system
     /// </summary>
-    public class SQLiteFramework
+    public class MongoDBFramework
     {
         protected Object m_lockObject = new Object();
 
-        protected SQLiteFramework(string connectionString)
+        protected MongoDBFramework(string connectionString)
         {
             DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
         }

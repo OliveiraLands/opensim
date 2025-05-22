@@ -34,12 +34,12 @@ using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A SQL Interface for user grid data
     /// </summary>
-    public class SQLiteGridUserData : SQLiteGenericTableHandler<GridUserData>, IGridUserData
+    public class SQLiteGridUserData : MongoDBGenericTableHandler<GridUserData>, IGridUserData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 

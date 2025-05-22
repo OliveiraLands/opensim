@@ -35,12 +35,12 @@ using OpenMetaverse;
 using OpenSim.Framework;
 using Mono.Data.Sqlite;
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A SQL Interface for user grid data
     /// </summary>
-    public class SQLiteHGTravelData : SQLiteGenericTableHandler<HGTravelingData>, IHGTravelingData
+    public class SQLiteHGTravelData : MongoDBGenericTableHandler<HGTravelingData>, IHGTravelingData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 

@@ -37,9 +37,9 @@ using OpenSim.Framework;
     using Mono.Data.Sqlite;
 #endif
 
-namespace OpenSim.Data.SQLite
+namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteFriendsData : SQLiteGenericTableHandler<FriendsData>, IFriendsData
+    public class SQLiteFriendsData : MongoDBGenericTableHandler<FriendsData>, IFriendsData
     {
         public SQLiteFriendsData(string connectionString, string realm)
             : base(connectionString, realm, "FriendsStore")
