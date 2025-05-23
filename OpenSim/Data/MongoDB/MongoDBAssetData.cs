@@ -30,12 +30,6 @@ using System.Data;
 using System.Reflection;
 using System.Collections.Generic;
 using log4net;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
-#else
-    using Mono.Data.Sqlite;
-#endif
-
 using OpenMetaverse;
 using OpenSim.Framework;
 
@@ -44,7 +38,7 @@ namespace OpenSim.Data.MongoDB
     /// <summary>
     /// An asset storage interface for the SQLite database system
     /// </summary>
-    public class SQLiteAssetData : AssetDataBase
+    public class MongoDBAssetData : AssetDataBase
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 

@@ -25,16 +25,20 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Reflection;
 using log4net;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.Serialization.IdGenerators;
+using MongoDB.Driver;
 using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
-using MongoDB.Driver;
-using MongoDB.Bson;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Reflection;
 
 namespace OpenSim.Data.MongoDB
 {
@@ -49,7 +53,10 @@ namespace OpenSim.Data.MongoDB
         protected string m_Realm;
         protected FieldInfo m_DataField = null;
 
-        protected static SqliteConnection m_Connection;
+        protected static MongoClient m_Connection;
+        protected static IMongoDatabase m_mongoDatabase;
+        private readonly IMongoCollection<T> _collection;
+
         private static bool m_initialized;
 
         protected virtual Assembly Assembly
@@ -58,46 +65,53 @@ namespace OpenSim.Data.MongoDB
         }
 
         public MongoDBGenericTableHandler(string connectionString,
-                string realm, string storeName) : base(connectionString)
+                string realm, string storeName, string campoId) : base(connectionString)
         {
             m_Realm = realm;
 
             if (!m_initialized)
             {
-                m_Connection = new SqliteConnection(connectionString);
+                var mongoUrl = new MongoUrl(connectionString);
+
+                m_Connection = new MongoClient(connectionString);
                 //Console.WriteLine(string.Format("OPENING CONNECTION FOR {0} USING {1}", storeName, connectionString));
-                m_Connection.Open();
+
+                m_mongoDatabase = m_Connection.GetDatabase(mongoUrl.DatabaseName);
+
+                _collection = m_mongoDatabase.GetCollection<T>(storeName);
+
+                RegistrarMapeamentoClasse<T>(campoId);
 
                 if (storeName != String.Empty)
                 {
-                    //SqliteConnection newConnection =
-                    //        (SqliteConnection)((ICloneable)m_Connection).Clone();
-                    //newConnection.Open();
-
-                    //Migration m = new Migration(newConnection, Assembly, storeName);
-                    Migration m = new Migration(m_Connection, Assembly, storeName);
-                    m.Update();
-                    //newConnection.Close();
-                    //newConnection.Dispose();
+                    // Build instructions for MondoDB data migration
+                    // Migration m = new Migration(m_Connection, Assembly, storeName);
                 }
 
                 m_initialized = true;
             }
 
-            Type t = typeof(T);
-            FieldInfo[] fields = t.GetFields(BindingFlags.Public |
-                                             BindingFlags.Instance |
-                                             BindingFlags.DeclaredOnly);
+        }
 
-            if (fields.Length == 0)
-                return;
-
-            foreach (FieldInfo f in  fields)
+        public static void RegistrarMapeamentoClasse<T>(string nomeCampoId)
+        {
+            if (!BsonClassMap.IsClassMapRegistered(typeof(T)))
             {
-                if (f.Name != "Data")
-                    m_Fields[f.Name] = f;
-                else
-                    m_DataField = f;
+                BsonClassMap.RegisterClassMap<T>(cm =>
+                {
+                    cm.AutoMap();
+                    cm.SetIgnoreExtraElements(true); // Ignora campos extras no documento BSON
+
+                    // Procura o campo especificado por nome
+                    var propInfo = typeof(T).GetProperty(nomeCampoId, BindingFlags.Public | BindingFlags.Instance);
+
+                    if (propInfo == null)
+                        throw new InvalidOperationException($"A propriedade '{nomeCampoId}' não existe na classe '{typeof(T).Name}'.");
+
+                    // Mapeia a propriedade como Id
+                    cm.MapIdMember(propInfo)
+                      .SetIdGenerator(StringObjectIdGenerator.Instance); // Pode mudar o gerador conforme o tipo do campo
+                });
             }
         }
 
@@ -127,27 +141,20 @@ namespace OpenSim.Data.MongoDB
             if (fields.Length != keys.Length)
                 return new T[0];
 
-            List<string> terms = new List<string>();
+            var builder = Builders<T>.Filter;
+            var filters = new List<FilterDefinition<T>>();
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            for (int i = 0; i < fields.Length; i++)
             {
-                for (int i = 0 ; i < fields.Length ; i++)
-                {
-                    cmd.Parameters.Add(new SqliteParameter(":" + fields[i], keys[i]));
-                    terms.Add("`" + fields[i] + "` = :" + fields[i]);
-                }
-
-                string where = String.Join(" and ", terms.ToArray());
-
-                string query = String.Format("select * from {0} where {1}",
-                        m_Realm, where);
-
-                cmd.CommandText = query;
-
-                return DoQuery(cmd);
+                filters.Add(builder.Eq(fields[i], keys[i]));
             }
+
+            var combinedFilter = builder.And(filters);
+
+            return _collection.Find(combinedFilter).ToList().ToArray();
         }
 
+        /*
         protected T[] DoQuery(SqliteCommand cmd)
         {
             IDataReader reader = ExecuteReader(cmd, m_Connection);
@@ -209,7 +216,9 @@ namespace OpenSim.Data.MongoDB
 
             return result.ToArray();
         }
+        */
 
+        /*
         public virtual T[] Get(string where)
         {
             using (SqliteCommand cmd = new SqliteCommand())
@@ -222,44 +231,39 @@ namespace OpenSim.Data.MongoDB
                 return DoQuery(cmd);
             }
         }
+        */
 
         public virtual bool Store(T row)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            // Obtém o tipo da classe T
+            var type = typeof(T);
+
+            // Procura a propriedade marcada com [BsonId]
+            var idProperty = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                                 .FirstOrDefault(prop => Attribute.IsDefined(prop, typeof(BsonIdAttribute)));
+
+            if (idProperty == null)
             {
-                string query = "";
-                List<String> names = new List<String>();
-                List<String> values = new List<String>();
-
-                foreach (FieldInfo fi in m_Fields.Values)
-                {
-                    names.Add(fi.Name);
-                    values.Add(":" + fi.Name);
-                    cmd.Parameters.Add(new SqliteParameter(":" + fi.Name, fi.GetValue(row).ToString()));
-                }
-
-                if (m_DataField != null)
-                {
-                    Dictionary<string, string> data =
-                            (Dictionary<string, string>)m_DataField.GetValue(row);
-
-                    foreach (KeyValuePair<string, string> kvp in data)
-                    {
-                        names.Add(kvp.Key);
-                        values.Add(":" + kvp.Key);
-                        cmd.Parameters.Add(new SqliteParameter(":" + kvp.Key, kvp.Value));
-                    }
-                }
-
-                query = String.Format("replace into {0} (`", m_Realm) + String.Join("`,`", names.ToArray()) + "`) values (" + String.Join(",", values.ToArray()) + ")";
-
-                cmd.CommandText = query;
-
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
+                throw new InvalidOperationException("A classe de dados deve ter uma propriedade marcada com [BsonId].");
             }
 
-            return false;
+            // Obtém o valor do _id
+            var idValue = idProperty.GetValue(row);
+            if (idValue == null)
+            {
+                throw new InvalidOperationException("O valor do campo [BsonId] não pode ser nulo.");
+            }
+
+            // Cria o filtro para localizar o documento com o mesmo _id
+            var filter = Builders<T>.Filter.Eq(idProperty.Name, idValue);
+
+            // Define as opções de substituição com upsert
+            var options = new ReplaceOptions { IsUpsert = true };
+
+            // Executa a substituição ou inserção
+            var result = _collection.ReplaceOne(filter, row, options);
+
+            return result.IsAcknowledged && (result.ModifiedCount > 0 || result.UpsertedId != null);
         }
 
         public virtual bool Delete(string field, string key)
@@ -272,24 +276,19 @@ namespace OpenSim.Data.MongoDB
             if (fields.Length != keys.Length)
                 return false;
 
-            List<string> terms = new List<string>();
+            var builder = Builders<T>.Filter;
+            var filters = new List<FilterDefinition<T>>();
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            for (int i = 0; i < fields.Length; i++)
             {
-                for (int i = 0 ; i < fields.Length ; i++)
-                {
-                    cmd.Parameters.Add(new SqliteParameter(":" + fields[i], keys[i]));
-                    terms.Add("`" + fields[i] + "` = :" + fields[i]);
-                }
-
-                string where = String.Join(" and ", terms.ToArray());
-
-                string query = String.Format("delete from {0} where {1}", m_Realm, where);
-
-                cmd.CommandText = query;
-
-                return ExecuteNonQuery(cmd, m_Connection) > 0;
+                filters.Add(builder.Eq(fields[i], keys[i]));
             }
+
+            var combinedFilter = builder.And(filters);
+
+            var result = _collection.DeleteMany(combinedFilter);
+
+            return result.DeletedCount > 0;
         }
     }
 }

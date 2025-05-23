@@ -31,18 +31,13 @@ using System.Collections.Generic;
 using System.Data;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpSqlite
-  using Community.CsharpSqlite.Sqlite;
-#else
-  using Mono.Data.Sqlite;
-#endif
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteAgentPreferencesData : MongoDBGenericTableHandler<AgentPreferencesData>, IAgentPreferencesData
+    public class MongoDBPreferencesData : MongoDBGenericTableHandler<AgentPreferencesData>, IAgentPreferencesData
     {
-        public SQLiteAgentPreferencesData(string connectionString, string realm)
-            : base(connectionString, realm, "AgentPrefs")
+        public MongoDBPreferencesData(string connectionString, string realm)
+            : base(connectionString, realm, "AgentPrefs", "PrincipalID")
         {
         }
 

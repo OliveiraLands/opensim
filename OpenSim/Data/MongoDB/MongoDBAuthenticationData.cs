@@ -34,12 +34,6 @@ using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
 
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
-#else
-    using Mono.Data.Sqlite;
-#endif
-
 namespace OpenSim.Data.MongoDB
 {
     public class SQLiteAuthenticationData : MongoDBFramework, IAuthenticationData

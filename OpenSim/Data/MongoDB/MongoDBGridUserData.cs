@@ -58,7 +58,7 @@ namespace OpenSim.Data.MongoDB
 
         public GridUserData[] GetAll(string userID)
         {
-            return base.Get(String.Format("UserID LIKE '{0}%'", userID));
+            return base.Get("UserID", userID);
         }
 
     }
