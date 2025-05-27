@@ -30,10 +30,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
 using log4net;
-#if CSharpSqlite
-using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+using Community.CsharpMongoDB.MongoDB;
 #else
-using Mono.Data.Sqlite;
+using Mono.Data.MongoDB;
 #endif
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
@@ -42,12 +42,12 @@ using OpenSim.Region.Framework.Interfaces;
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteUserProfilesData: IProfilesData
+    public class MongoDBUserProfilesData: IProfilesData
     {
         private static readonly ILog m_log =
             LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        private SqliteConnection m_connection;
+        private MongoDBConnection m_connection;
         private string m_connectionString;
 
         private Dictionary<string, FieldInfo> m_FieldMap =
@@ -58,24 +58,24 @@ namespace OpenSim.Data.MongoDB
             get { return GetType().Assembly; }
         }
 
-        public SQLiteUserProfilesData()
+        public MongoDBUserProfilesData()
         {
         }
 
-        public SQLiteUserProfilesData(string connectionString)
+        public MongoDBUserProfilesData(string connectionString)
         {
             Initialise(connectionString);
         }
 
         public void Initialise(string connectionString)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
+            DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
 
             m_connectionString = connectionString;
 
-            m_log.Info("[PROFILES_DATA]: Sqlite - connecting: "+m_connectionString);
+            m_log.Info("[PROFILES_DATA]: MongoDB - connecting: "+m_connectionString);
 
-            m_connection = new SqliteConnection(m_connectionString);
+            m_connection = new MongoDBConnection(m_connectionString);
             m_connection.Open();
 
             Migration m = new Migration(m_connection, Assembly, "UserProfiles");
@@ -94,7 +94,7 @@ namespace OpenSim.Data.MongoDB
             string query = "SELECT classifieduuid, name FROM classifieds WHERE creatoruuid = :Id";
             IDataReader reader = null;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = query;
                 cmd.Parameters.AddWithValue(":Id", creatorId);
@@ -190,7 +190,7 @@ namespace OpenSim.Data.MongoDB
             ad.ExpirationDate = (int)epochexp.TotalSeconds;
 
             try {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":ClassifiedId", ad.ClassifiedId.ToString());
@@ -230,7 +230,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":ClassifiedId", recordId.ToString());
@@ -257,7 +257,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":AdId", ad.ClassifiedId.ToString());
@@ -303,7 +303,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":Id", avatarId.ToString());
@@ -340,7 +340,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":CreatorId", avatarId.ToString());
@@ -416,7 +416,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     int top_pick;
                     int.TryParse(pick.TopPick.ToString(), out top_pick);
@@ -459,7 +459,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":PickId", pickId.ToString());
@@ -487,7 +487,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":Id", notes.UserId.ToString());
@@ -533,7 +533,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
 
@@ -562,7 +562,7 @@ namespace OpenSim.Data.MongoDB
             query += "SELECT * FROM userprofile WHERE ";
             query += "useruuid = :Id";
 
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":Id", props.UserId.ToString());
@@ -639,7 +639,7 @@ namespace OpenSim.Data.MongoDB
                             query += ":profileFirstImage, ";
                             query += ":profileFirstText)";
 
-                            using (SqliteCommand put = (SqliteCommand)m_connection.CreateCommand())
+                            using (MongoDBCommand put = (MongoDBCommand)m_connection.CreateCommand())
                             {
                                 put.CommandText = query;
                                 put.Parameters.AddWithValue(":userId", props.UserId.ToString());
@@ -678,7 +678,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":profileURL", props.WebUrl);
@@ -715,7 +715,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":WantMask", up.WantToMask);
@@ -751,7 +751,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":ImViaEmail", pref.IMViaEmail);
@@ -785,7 +785,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue("?Id", pref.UserId.ToString());
@@ -803,7 +803,7 @@ namespace OpenSim.Data.MongoDB
                             query = "INSERT INTO usersettings VALUES ";
                             query += "(:Id,'false','false', :Email)";
 
-                            using (SqliteCommand put = (SqliteCommand)m_connection.CreateCommand())
+                            using (MongoDBCommand put = (MongoDBCommand)m_connection.CreateCommand())
                             {
                                 put.Parameters.AddWithValue(":Id", pref.UserId.ToString());
                                 put.Parameters.AddWithValue(":Email", pref.EMail);
@@ -835,7 +835,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":Id", props.UserId.ToString());
@@ -856,7 +856,7 @@ namespace OpenSim.Data.MongoDB
                             query += ":DataKey,";
                             query +=  ":DataVal) ";
 
-                            using (SqliteCommand put = (SqliteCommand)m_connection.CreateCommand())
+                            using (MongoDBCommand put = (MongoDBCommand)m_connection.CreateCommand())
                             {
                                 put.Parameters.AddWithValue(":Id", props.UserId.ToString());
                                 put.Parameters.AddWithValue(":TagId", props.TagId.ToString());
@@ -891,7 +891,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":UserId", props.UserId.ToString());
@@ -921,7 +921,7 @@ namespace OpenSim.Data.MongoDB
 
             try
             {
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = string.Format(query, "\"classifieds\"");
                     cmd.Parameters.AddWithValue(":Id", avatarId.ToString());
@@ -935,7 +935,7 @@ namespace OpenSim.Data.MongoDB
                     }
                 }
 
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = string.Format(query, "\"userpicks\"");
                     cmd.Parameters.AddWithValue(":Id", avatarId.ToString());
@@ -951,7 +951,7 @@ namespace OpenSim.Data.MongoDB
 
                 query = "SELECT `profileImage`, `profileFirstImage` FROM `userprofile` WHERE `useruuid` = :Id";
 
-                using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = query;
                     cmd.Parameters.AddWithValue(":Id", avatarId.ToString());

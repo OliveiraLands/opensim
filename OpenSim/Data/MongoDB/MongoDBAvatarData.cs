@@ -33,30 +33,30 @@ using System.Threading;
 using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
-    /// A SQLite Interface for Avatar Data
+    /// A MongoDB Interface for Avatar Data
     /// </summary>
-    public class SQLiteAvatarData : MongoDBGenericTableHandler<AvatarBaseData>,
+    public class MongoDBAvatarData : MongoDBGenericTableHandler<AvatarBaseData>,
             IAvatarData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        public SQLiteAvatarData(string connectionString, string realm) :
+        public MongoDBAvatarData(string connectionString, string realm) :
                 base(connectionString, realm, "Avatar")
         {
         }
 
         public bool Delete(UUID principalID, string name)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("delete from {0} where `PrincipalID` = :PrincipalID and `Name` = :Name", m_Realm);
                 cmd.Parameters.AddWithValue(":PrincipalID", principalID.ToString());

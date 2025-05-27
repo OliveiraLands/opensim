@@ -31,17 +31,17 @@ using System.Collections.Generic;
 using System.Data;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteMuteListData : MongoDBGenericTableHandler<MuteData>, IMuteListData
+    public class MongoDBMuteListData : MongoDBGenericTableHandler<MuteData>, IMuteListData
     {
-        public SQLiteMuteListData(string connectionString)
+        public MongoDBMuteListData(string connectionString)
                 : base(connectionString, "MuteList", "MuteListStore")
         {
         }
@@ -54,7 +54,7 @@ namespace OpenSim.Data.MongoDB
 
         public bool Delete(UUID agentID, UUID muteID, string muteName)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = "delete from MuteList where `AgentID` = :AgentID and `MuteID` = :MuteID and `MuteName` = :MuteName";
 

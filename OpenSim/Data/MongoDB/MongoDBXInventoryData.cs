@@ -29,10 +29,10 @@ using System;
 using System.Data;
 using System.Reflection;
 using System.Collections.Generic;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 using log4net;
 using OpenMetaverse;
@@ -41,22 +41,22 @@ using OpenSim.Framework;
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
-    /// A SQLite Interface for the Asset Server
+    /// A MongoDB Interface for the Asset Server
     /// </summary>
-    public class SQLiteXInventoryData : IXInventoryData
+    public class MongoDBXInventoryData : IXInventoryData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        private SqliteFolderHandler m_Folders;
-        private SqliteItemHandler m_Items;
+        private MongoDBFolderHandler m_Folders;
+        private MongoDBItemHandler m_Items;
 
-        public SQLiteXInventoryData(string conn, string realm)
+        public MongoDBXInventoryData(string conn, string realm)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
+            DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
 
-            m_Folders = new SqliteFolderHandler(
+            m_Folders = new MongoDBFolderHandler(
                     conn, "inventoryfolders", "XInventoryStore");
-            m_Items = new SqliteItemHandler(
+            m_Items = new MongoDBItemHandler(
                     conn, "inventoryitems", String.Empty);
         }
 
@@ -134,9 +134,9 @@ namespace OpenSim.Data.MongoDB
         }
     }
 
-    public class SqliteItemHandler : SqliteInventoryHandler<XInventoryItem>
+    public class MongoDBItemHandler : MongoDBInventoryHandler<XInventoryItem>
     {
-        public SqliteItemHandler(string c, string t, string m) :
+        public MongoDBItemHandler(string c, string t, string m) :
                 base(c, t, m)
         {
         }
@@ -193,11 +193,11 @@ namespace OpenSim.Data.MongoDB
 
             UUID oldParent = retrievedItems[0].parentFolderID;
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("update {0} set parentFolderID = :ParentFolderID where inventoryID = :InventoryID", m_Realm);
-                cmd.Parameters.Add(new SqliteParameter(":ParentFolderID", newParent));
-                cmd.Parameters.Add(new SqliteParameter(":InventoryID", id));
+                cmd.Parameters.Add(new MongoDBParameter(":ParentFolderID", newParent));
+                cmd.Parameters.Add(new MongoDBParameter(":InventoryID", id));
 
                 if (ExecuteNonQuery(cmd, m_Connection) == 0)
                     return false;
@@ -211,12 +211,12 @@ namespace OpenSim.Data.MongoDB
 
         public XInventoryItem[] GetActiveGestures(UUID principalID)
         {
-            using (SqliteCommand cmd  = new SqliteCommand())
+            using (MongoDBCommand cmd  = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("select * from inventoryitems where avatarId = :uuid and assetType = :type and flags = 1", m_Realm);
 
-                cmd.Parameters.Add(new SqliteParameter(":uuid", principalID.ToString()));
-                cmd.Parameters.Add(new SqliteParameter(":type", (int)AssetType.Gesture));
+                cmd.Parameters.Add(new MongoDBParameter(":uuid", principalID.ToString()));
+                cmd.Parameters.Add(new MongoDBParameter(":type", (int)AssetType.Gesture));
 
                 return DoQuery(cmd);
             }
@@ -226,11 +226,11 @@ namespace OpenSim.Data.MongoDB
         {
             IDataReader reader;
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("select inventoryCurrentPermissions from inventoryitems where avatarID = :PrincipalID and assetID = :AssetID", m_Realm);
-                cmd.Parameters.Add(new SqliteParameter(":PrincipalID", principalID.ToString()));
-                cmd.Parameters.Add(new SqliteParameter(":AssetID", assetID.ToString()));
+                cmd.Parameters.Add(new MongoDBParameter(":PrincipalID", principalID.ToString()));
+                cmd.Parameters.Add(new MongoDBParameter(":AssetID", assetID.ToString()));
 
                 reader = ExecuteReader(cmd, m_Connection);
             }
@@ -249,9 +249,9 @@ namespace OpenSim.Data.MongoDB
         }
     }
 
-    public class SqliteFolderHandler : SqliteInventoryHandler<XInventoryFolder>
+    public class MongoDBFolderHandler : MongoDBInventoryHandler<XInventoryFolder>
     {
-        public SqliteFolderHandler(string c, string t, string m) :
+        public MongoDBFolderHandler(string c, string t, string m) :
                 base(c, t, m)
         {
         }
@@ -275,11 +275,11 @@ namespace OpenSim.Data.MongoDB
 
             UUID oldParentFolderUUID = folders[0].parentFolderID;
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("update {0} set parentFolderID = :ParentFolderID where folderID = :FolderID", m_Realm);
-                cmd.Parameters.Add(new SqliteParameter(":ParentFolderID", newParentFolderID));
-                cmd.Parameters.Add(new SqliteParameter(":FolderID", id));
+                cmd.Parameters.Add(new MongoDBParameter(":ParentFolderID", newParentFolderID));
+                cmd.Parameters.Add(new MongoDBParameter(":FolderID", id));
 
                 if (ExecuteNonQuery(cmd, m_Connection) == 0)
                     return false;
@@ -293,9 +293,9 @@ namespace OpenSim.Data.MongoDB
 
     }
 
-    public class SqliteInventoryHandler<T> : MongoDBGenericTableHandler<T> where T: class, new()
+    public class MongoDBInventoryHandler<T> : MongoDBGenericTableHandler<T> where T: class, new()
     {
-        public SqliteInventoryHandler(string c, string t, string m) : base(c, t, m) {}
+        public MongoDBInventoryHandler(string c, string t, string m) : base(c, t, m) {}
 
         protected bool IncrementFolderVersion(UUID folderID)
         {
@@ -307,10 +307,10 @@ namespace OpenSim.Data.MongoDB
 //            m_log.DebugFormat("[MYSQL ITEM HANDLER]: Incrementing version on folder {0}", folderID);
 //            Util.PrintCallStack();
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = "update inventoryfolders set version=version+1 where folderID = :folderID";
-                cmd.Parameters.Add(new SqliteParameter(":folderID", folderID));
+                cmd.Parameters.Add(new MongoDBParameter(":folderID", folderID));
 
                 if(ExecuteNonQuery(cmd, m_Connection) == 0)
                     return false;

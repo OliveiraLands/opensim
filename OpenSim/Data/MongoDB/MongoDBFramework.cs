@@ -52,37 +52,38 @@ namespace OpenSim.Data.MongoDB
         // All non queries are funneled through one connection
         // to increase performance a little
         //
-        protected int ExecuteNonQuery(SqliteCommand cmd, SqliteConnection connection)
+        protected int ExecuteNonQuery(IMongoDatabase cmd, MongoClient connection)
         {
             lock (connection)
             {
-/*
-                SqliteConnection newConnection =
-                        (SqliteConnection)((ICloneable)connection).Clone();
-                newConnection.Open();
+                /*
+                                MongoDBConnection newConnection =
+                                        (MongoDBConnection)((ICloneable)connection).Clone();
+                                newConnection.Open();
 
-                cmd.Connection = newConnection;
-*/
-                cmd.Connection = connection;
-                //Console.WriteLine("XXX " + cmd.CommandText);
-
-                return cmd.ExecuteNonQuery();
+                                cmd.Connection = newConnection;
+                                cmd.Connection = connection;
+                                //Console.WriteLine("XXX " + cmd.CommandText);
+                */
+                throw new NotImplementedException("ExecuteNonQuery is not implemented for MongoDBFramework");
+                // return -1; // cmd.ExecuteNonQuery();
             }
         }
 
-        protected IDataReader ExecuteReader(SqliteCommand cmd, SqliteConnection connection)
+        protected IDataReader ExecuteReader(IMongoDatabase cmd, MongoClient connection)
         {
             lock (connection)
             {
-                //SqliteConnection newConnection =
-                //        (SqliteConnection)((ICloneable)connection).Clone();
+                //MongoDBConnection newConnection =
+                //        (MongoDBConnection)((ICloneable)connection).Clone();
                 //newConnection.Open();
 
                 //cmd.Connection = newConnection;
-                cmd.Connection = connection;
+                //cmd.Connection = connection;
                 //Console.WriteLine("XXX " + cmd.CommandText);
 
-                return cmd.ExecuteReader();
+                throw new NotImplementedException("ExecuteReader is not implemented for MongoDBFramework");
+                //return null; // cmd.ExecuteReader();
             }
         }
     }

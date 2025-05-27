@@ -25,18 +25,25 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-using System;
-using System.Data;
-using System.Reflection;
-using System.Collections.Generic;
 using log4net;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.IdGenerators;
+using MongoDB.Driver;
+using MongoDB.Driver.Core.Configuration;
 using OpenMetaverse;
 using OpenSim.Framework;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
 
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
-    /// An asset storage interface for the SQLite database system
+    /// An asset storage interface for the MongoDB database system
     /// </summary>
     public class MongoDBAssetData : AssetDataBase
     {
@@ -49,7 +56,11 @@ namespace OpenSim.Data.MongoDB
         private const string UpdateAssetSQL = "update assets set Name=:Name, Description=:Description, Type=:Type, Local=:Local, Temporary=:Temporary, asset_flags=:Flags, CreatorID=:CreatorID, Data=:Data, Hash=:hash where UUID=:UUID";
         private const string assetSelect = "select * from assets";
 
-        private SqliteConnection m_conn;
+        protected static MongoClient m_Connection;
+        protected static IMongoDatabase m_mongoDatabase;
+        private   IMongoCollection<AssetBase> _collection;
+
+        private const string storeName = "Assets";
 
         protected virtual Assembly Assembly
         {
@@ -58,34 +69,46 @@ namespace OpenSim.Data.MongoDB
 
         override public void Dispose()
         {
-            if (m_conn != null)
-            {
-                m_conn.Close();
-                m_conn = null;
-            }
+            m_Connection = null;
+            m_mongoDatabase = null;
         }
 
         /// <summary>
         /// <list type="bullet">
         /// <item>Initialises AssetData interface</item>
-        /// <item>Loads and initialises a new SQLite connection and maintains it.</item>
+        /// <item>Loads and initialises a new MongoDB connection and maintains it.</item>
         /// <item>use default URI if connect string is empty.</item>
         /// </list>
         /// </summary>
         /// <param name="dbconnect">connect string</param>
         override public void Initialise(string dbconnect)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
 
-            if (dbconnect.Length == 0)
+            var mongoUrl = new MongoUrl(dbconnect);
+            m_Connection = new MongoClient(dbconnect);
+
+            m_mongoDatabase = m_Connection.GetDatabase(mongoUrl.DatabaseName);
+
+            _collection = m_mongoDatabase.GetCollection<AssetBase>(storeName);
+
+            if (!BsonClassMap.IsClassMapRegistered(typeof(AssetBase)))
             {
-                dbconnect = "URI=file:Asset.db,version=3";
-            }
-            m_conn = new SqliteConnection(dbconnect);
-            m_conn.Open();
+                BsonClassMap.RegisterClassMap<AssetDataBase>(cm =>
+                {
+                    cm.AutoMap();
+                    cm.SetIgnoreExtraElements(true); // Ignora campos extras no documento BSON
 
-            Migration m = new Migration(m_conn, Assembly, "AssetStore");
-            m.Update();
+                    // Procura o campo especificado por nome
+                    var propInfo = typeof(AssetBase).GetProperty("ID", BindingFlags.Public | BindingFlags.Instance);
+
+                    if (propInfo == null)
+                        throw new InvalidOperationException($"A propriedade 'ID' não existe na classe '{typeof(AssetBase).Name}'.");
+
+                    // Mapeia a propriedade como Id
+                    cm.MapIdMember(propInfo)
+                      .SetIdGenerator(StringObjectIdGenerator.Instance); // Pode mudar o gerador conforme o tipo do campo
+                });
+            }
 
             return;
         }
@@ -99,24 +122,11 @@ namespace OpenSim.Data.MongoDB
         {
             lock (this)
             {
-                using (SqliteCommand cmd = new SqliteCommand(SelectAssetSQL, m_conn))
-                {
-                    cmd.Parameters.Add(new SqliteParameter(":UUID", uuid.ToString()));
-                    using (IDataReader reader = cmd.ExecuteReader())
-                    {
-                        if (reader.Read())
-                        {
-                            AssetBase asset = buildAsset(reader);
-                            reader.Close();
-                            return asset;
-                        }
-                        else
-                        {
-                            reader.Close();
-                            return null;
-                        }
-                    }
-                }
+               AssetBase retorno = _collection.Find(x => x.FullID == uuid)
+                    .FirstOrDefaultAsync()
+                    .Result;
+
+                return retorno ?? null;
             }
         }
 
@@ -124,7 +134,7 @@ namespace OpenSim.Data.MongoDB
         /// Create an asset
         /// </summary>
         /// <param name="asset">Asset Base</param>
-        override public bool StoreAsset(AssetBase asset)
+        override public async Task<bool> StoreAsset(AssetBase asset)
         {
             string assetName = asset.Name;
             if (asset.Name.Length > AssetBase.MAX_ASSET_NAME)
@@ -144,53 +154,13 @@ namespace OpenSim.Data.MongoDB
                     asset.Description, asset.ID, asset.Description.Length, assetDescription.Length);
             }
 
-            //m_log.Info("[ASSET DB]: Creating Asset " + asset.FullID.ToString());
-            if (AssetsExist(new[] { asset.FullID })[0])
-            {
-                //LogAssetLoad(asset);
+            var filter = Builders<AssetBase>.Filter.Eq(a => a.FullID, asset.FullID);
+            var options = new ReplaceOptions { IsUpsert = true };
 
-                lock (this)
-                {
-                    using (SqliteCommand cmd = new SqliteCommand(UpdateAssetSQL, m_conn))
-                    {
-                        cmd.Parameters.Add(new SqliteParameter(":UUID", asset.FullID.ToString()));
-                        cmd.Parameters.Add(new SqliteParameter(":Name", assetName));
-                        cmd.Parameters.Add(new SqliteParameter(":Description", assetDescription));
-                        cmd.Parameters.Add(new SqliteParameter(":Type", asset.Type));
-                        cmd.Parameters.Add(new SqliteParameter(":Local", asset.Local));
-                        cmd.Parameters.Add(new SqliteParameter(":Temporary", asset.Temporary));
-                        cmd.Parameters.Add(new SqliteParameter(":Flags", asset.Flags));
-                        cmd.Parameters.Add(new SqliteParameter(":CreatorID", asset.Metadata.CreatorID));
-                        cmd.Parameters.Add(new SqliteParameter(":Data", asset.Data));
-                        cmd.Parameters.Add(new SqliteParameter(":hash", asset.Hash));
+            // Atualizar registro existente (ou inserir se IsUpsert for true)
+            var result = _collection.ReplaceOneAsync(filter, asset, options).Result;
 
-                        cmd.ExecuteNonQuery();
-                        return true;
-                    }
-                }
-            }
-            else
-            {
-                lock (this)
-                {
-                    using (SqliteCommand cmd = new SqliteCommand(InsertAssetSQL, m_conn))
-                    {
-                        cmd.Parameters.Add(new SqliteParameter(":UUID", asset.FullID.ToString()));
-                        cmd.Parameters.Add(new SqliteParameter(":Name", assetName));
-                        cmd.Parameters.Add(new SqliteParameter(":Description", assetDescription));
-                        cmd.Parameters.Add(new SqliteParameter(":Type", asset.Type));
-                        cmd.Parameters.Add(new SqliteParameter(":Local", asset.Local));
-                        cmd.Parameters.Add(new SqliteParameter(":Temporary", asset.Temporary));
-                        cmd.Parameters.Add(new SqliteParameter(":Flags", asset.Flags));
-                        cmd.Parameters.Add(new SqliteParameter(":CreatorID", asset.Metadata.CreatorID));
-                        cmd.Parameters.Add(new SqliteParameter(":Data", asset.Data));
-                        cmd.Parameters.Add(new SqliteParameter(":hash", asset.Hash));
-
-                        cmd.ExecuteNonQuery();
-                        return true;
-                    }
-                }
-            }
+            return result.IsAcknowledged && (result.ModifiedCount > 0 || result.UpsertedId != null);
         }
 
 //        /// <summary>
@@ -220,29 +190,34 @@ namespace OpenSim.Data.MongoDB
             if (uuids.Length == 0)
                 return new bool[0];
 
-            HashSet<UUID> exist = new HashSet<UUID>();
+            // Converte os UUIDs para a representação de string ou Guid esperada no MongoDB
+            var stringUuids = uuids.Select(u => u.ToString()).ToList(); // Ajuste aqui conforme o tipo real de UUID
 
-            string ids = "'" + string.Join("','", uuids) + "'";
-            string sql = string.Format("select UUID from assets where UUID in ({0})", ids);
+            // Cria um filtro para buscar documentos onde o campo 'Id' (mapeado de UUID) está na lista de stringUuids
+            var filter = Builders<AssetBase>.Filter.In(a => a.FullID.ToString(), stringUuids);
 
-            lock (this)
+            // Projeta apenas o campo Id para reduzir a quantidade de dados transferidos
+            var projection = Builders<AssetBase>.Projection.Include(a => a.FullID);
+
+            // Busca no MongoDB e obtém os IDs existentes
+            var existingAssetsIds = _collection
+                .Find(filter)
+                .Project(projection)
+                .ToList();
+
+            // Converte a lista de BsonDocuments para HashSet de UUIDs para busca eficiente
+            // Se o Id é um ObjectId em BsonType.ObjectId, você precisará de conversão adicional.
+            // Se é string ou Guid, a conversão é mais direta.
+            var existingUuidsInDb = new HashSet<string>(existingAssetsIds.Select(doc => doc["_id"].AsString)); // Ajustar conforme o tipo de _id no DB
+
+            bool[] results = new bool[uuids.Count()];
+            int i = 0;
+            foreach (var uuid in uuids)
             {
-                using (SqliteCommand cmd = new SqliteCommand(sql, m_conn))
-                {
-                    using (IDataReader reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            UUID id = new UUID((string)reader["UUID"]);
-                            exist.Add(id);
-                        }
-                    }
-                }
+                results[i] = existingUuidsInDb.Contains(uuid.ToString()); // Compara a string do UUID
+                i++;
             }
 
-            bool[] results = new bool[uuids.Length];
-            for (int i = 0; i < uuids.Length; i++)
-                results[i] = exist.Contains(uuids[i]);
             return results;
         }
 
@@ -305,20 +280,30 @@ namespace OpenSim.Data.MongoDB
 
             lock (this)
             {
-                using (SqliteCommand cmd = new SqliteCommand(SelectAssetMetadataSQL, m_conn))
-                {
-                    cmd.Parameters.Add(new SqliteParameter(":start", start));
-                    cmd.Parameters.Add(new SqliteParameter(":count", count));
+                if (start < 0) start = 0;
+                if (count < 1) return new List<AssetMetadata>(); // Garante que count seja positivo
 
-                    using (IDataReader reader = cmd.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            AssetMetadata metadata = buildAssetMetadata(reader);
-                            retList.Add(metadata);
-                        }
-                    }
-                }
+                // Define um filtro vazio para retornar todos os documentos
+                var filter = Builders<AssetBase>.Filter.Empty;
+
+                // Cria a lista de metadados de forma assíncrona
+               retList = _collection.Find(filter)
+                                             .Skip(start) // Pula os primeiros 'start' documentos
+                                             .Limit(count) // Limita o resultado aos próximos 'count' documentos
+                                             .Project(assetBase => new AssetMetadata
+                                             {
+                                                 FullID = assetBase.FullID,
+                                                 Name = assetBase.Name,
+                                                 Description = assetBase.Description,
+                                                 Type = assetBase.Type,
+                                                 Temporary = assetBase.Temporary,
+                                                 Flags = assetBase.Flags,
+                                                 CreatorID = assetBase.CreatorID,
+                                                 Hash = assetBase.Hash
+                                             })
+                                             .ToListAsync()
+                                             .Result; // Executa a consulta e retorna a lista
+
             }
 
             return retList;
@@ -357,7 +342,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         override public void Initialise()
         {
-            Initialise("URI=file:Asset.db,version=3");
+            throw new NotImplementedException();
         }
 
         /// <summary>
@@ -365,7 +350,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         override public string Name
         {
-            get { return "SQLite Asset storage engine"; }
+            get { return "MongoDB Asset storage engine"; }
         }
 
         // TODO: (AlexRa): one of these is to be removed eventually (?)
@@ -378,14 +363,14 @@ namespace OpenSim.Data.MongoDB
         {
             lock (this)
             {
-                using (SqliteCommand cmd = new SqliteCommand(DeleteAssetSQL, m_conn))
-                {
-                    cmd.Parameters.Add(new SqliteParameter(":UUID", uuid.ToString()));
-                    cmd.ExecuteNonQuery();
-                }
-            }
+                var filter = Builders<AssetBase>.Filter.Eq(a => a.FullID.ToString(), uuid.ToString());
 
-            return true;
+                // Executa a operação de exclusão de um único documento
+                var result = _collection.DeleteOneAsync(filter).Result;
+
+                // Retorna true se um documento foi excluído (DeletedCount > 0)
+                return result.DeletedCount > 0;
+            }
         }
 
         public override bool Delete(string id)

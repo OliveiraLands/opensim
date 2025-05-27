@@ -39,11 +39,11 @@ namespace OpenSim.Data.MongoDB
     /// <summary>
     /// A SQL Interface for user grid data
     /// </summary>
-    public class SQLiteGridUserData : MongoDBGenericTableHandler<GridUserData>, IGridUserData
+    public class MongoDBGridUserData : MongoDBGenericTableHandler<GridUserData>, IGridUserData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        public SQLiteGridUserData(string connectionString, string realm)
+        public MongoDBGridUserData(string connectionString, string realm)
             : base(connectionString, realm, "GridUserStore") {}
 
         public new GridUserData Get(string userID)

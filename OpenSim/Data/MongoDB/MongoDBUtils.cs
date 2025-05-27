@@ -27,18 +27,18 @@
 
 using System;
 using System.Data;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
-    /// A base class for methods needed by all SQLite database classes
+    /// A base class for methods needed by all MongoDB database classes
     /// </summary>
-    public class SQLiteUtil
+    public class MongoDBUtil
     {
         /***********************************************************************
          *
@@ -85,7 +85,7 @@ namespace OpenSim.Data.MongoDB
         /// front.  If we just have a list of b, c, etc... we can
         /// generate these strings instead of typing them out.
         /// </remarks>
-        public static SqliteCommand createInsertCommand(string table, DataTable dt)
+        public static MongoDBCommand createInsertCommand(string table, DataTable dt)
         {
 
             string[] cols = new string[dt.Columns.Count];
@@ -101,13 +101,13 @@ namespace OpenSim.Data.MongoDB
             sql += ") values (:";
             sql += String.Join(", :", cols);
             sql += ")";
-            SqliteCommand cmd = new SqliteCommand(sql);
+            MongoDBCommand cmd = new MongoDBCommand(sql);
 
             // this provides the binding for all our parameters, so
             // much less code than it used to be
             foreach (DataColumn col in dt.Columns)
             {
-                cmd.Parameters.Add(createSqliteParameter(col.ColumnName, col.DataType));
+                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
             }
             return cmd;
         }
@@ -119,7 +119,7 @@ namespace OpenSim.Data.MongoDB
         /// <param name="pk"></param>
         /// <param name="dt"></param>
         /// <returns>the created command</returns>
-        public static SqliteCommand createUpdateCommand(string table, string pk, DataTable dt)
+        public static MongoDBCommand createUpdateCommand(string table, string pk, DataTable dt)
         {
             string sql = "update " + table + " set ";
             string subsql = String.Empty;
@@ -134,14 +134,14 @@ namespace OpenSim.Data.MongoDB
             }
             sql += subsql;
             sql += " where " + pk;
-            SqliteCommand cmd = new SqliteCommand(sql);
+            MongoDBCommand cmd = new MongoDBCommand(sql);
 
             // this provides the binding for all our parameters, so
             // much less code than it used to be
 
             foreach (DataColumn col in dt.Columns)
             {
-                cmd.Parameters.Add(createSqliteParameter(col.ColumnName, col.DataType));
+                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
             }
             return cmd;
         }
@@ -162,7 +162,7 @@ namespace OpenSim.Data.MongoDB
                     // a map function would rock so much here
                     subsql += ",\n";
                 }
-                subsql += col.ColumnName + " " + sqliteType(col.DataType);
+                subsql += col.ColumnName + " " + MongoDBType(col.DataType);
                 if (dt.PrimaryKey.Length > 0)
                 {
                     if (col == dt.PrimaryKey[0])
@@ -188,7 +188,7 @@ namespace OpenSim.Data.MongoDB
         ///<summary>
         /// <para>
         /// This is a convenience function that collapses 5 repetitive
-        /// lines for defining SqliteParameters to 2 parameters:
+        /// lines for defining MongoDBParameters to 2 parameters:
         /// column name and database type.
         /// </para>
         ///
@@ -201,10 +201,10 @@ namespace OpenSim.Data.MongoDB
         ///</summary>
         /// <param name="name"></param>
         /// <param name="type"></param>
-        ///<returns>a built sqlite parameter</returns>
-        public static SqliteParameter createSqliteParameter(string name, Type type)
+        ///<returns>a built MongoDB parameter</returns>
+        public static MongoDBParameter createMongoDBParameter(string name, Type type)
         {
-            SqliteParameter param = new SqliteParameter();
+            MongoDBParameter param = new MongoDBParameter();
             param.ParameterName = ":" + name;
             param.DbType = dbtypeFromType(type);
             param.SourceColumn = name;
@@ -268,7 +268,7 @@ namespace OpenSim.Data.MongoDB
         /// <param name="type">a Type</param>
         /// <returns>a string</returns>
         /// <remarks>this is something we'll need to implement for each db slightly differently.</remarks>
-        public static string sqliteType(Type type)
+        public static string MongoDBType(Type type)
         {
             if (type == typeof (String))
             {

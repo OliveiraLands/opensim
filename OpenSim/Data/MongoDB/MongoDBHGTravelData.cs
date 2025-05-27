@@ -33,18 +33,18 @@ using System.Threading;
 using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
-using Mono.Data.Sqlite;
+using Mono.Data.MongoDB;
 
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
     /// A SQL Interface for user grid data
     /// </summary>
-    public class SQLiteHGTravelData : MongoDBGenericTableHandler<HGTravelingData>, IHGTravelingData
+    public class MongoDBHGTravelData : MongoDBGenericTableHandler<HGTravelingData>, IHGTravelingData
     {
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        public SQLiteHGTravelData(string connectionString, string realm)
+        public MongoDBHGTravelData(string connectionString, string realm)
             : base(connectionString, realm, "HGTravelStore") {}
 
         public HGTravelingData Get(UUID sessionID)
@@ -69,7 +69,7 @@ namespace OpenSim.Data.MongoDB
 
         public void DeleteOld()
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("delete from {0} where TMStamp < datetime('now', '-2 day') ", m_Realm);
 

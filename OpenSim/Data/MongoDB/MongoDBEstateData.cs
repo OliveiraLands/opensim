@@ -30,10 +30,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
 using log4net;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 using OpenMetaverse;
 using OpenSim.Framework;
@@ -41,12 +41,12 @@ using OpenSim.Region.Framework.Interfaces;
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteEstateStore : IEstateDataStore
+    public class MongoDBEstateStore : IEstateDataStore
     {
         private static readonly ILog m_log =
             LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        private SqliteConnection m_connection;
+        private MongoDBConnection m_connection;
         private string m_connectionString;
 
         private FieldInfo[] m_Fields;
@@ -58,24 +58,24 @@ namespace OpenSim.Data.MongoDB
             get { return GetType().Assembly; }
         }
 
-        public SQLiteEstateStore()
+        public MongoDBEstateStore()
         {
         }
 
-        public SQLiteEstateStore(string connectionString)
+        public MongoDBEstateStore(string connectionString)
         {
             Initialise(connectionString);
         }
 
         public void Initialise(string connectionString)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
+            DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
 
             m_connectionString = connectionString;
 
-            m_log.Info("[ESTATE DB]: Sqlite - connecting: "+m_connectionString);
+            m_log.Info("[ESTATE DB]: MongoDB - connecting: "+m_connectionString);
 
-            m_connection = new SqliteConnection(m_connectionString);
+            m_connection = new MongoDBConnection(m_connectionString);
             m_connection.Open();
 
             Migration m = new Migration(m_connection, Assembly, "EstateStore");
@@ -103,7 +103,7 @@ namespace OpenSim.Data.MongoDB
         {
             string sql = "select estate_settings."+String.Join(",estate_settings.", FieldList)+" from estate_map left join estate_settings on estate_map.EstateID = estate_settings.EstateID where estate_settings.EstateID is not null and RegionID = :RegionID";
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = sql;
                 cmd.Parameters.AddWithValue(":RegionID", regionID.ToString());
@@ -112,7 +112,7 @@ namespace OpenSim.Data.MongoDB
             }
         }
 
-        private EstateSettings DoLoad(SqliteCommand cmd, UUID regionID, bool create)
+        private EstateSettings DoLoad(MongoDBCommand cmd, UUID regionID, bool create)
         {
             EstateSettings es = new EstateSettings();
             es.OnSave += StoreEstateSettings;
@@ -121,9 +121,9 @@ namespace OpenSim.Data.MongoDB
             {
                  r = cmd.ExecuteReader();
             }
-            catch (SqliteException)
+            catch (MongoDBException)
             {
-                m_log.Error("[SQLITE]: There was an issue loading the estate settings.  This can happen the first time running OpenSimulator with CSharpSqlite the first time.  OpenSimulator will probably crash, restart it and it should be good to go.");
+                m_log.Error("[MongoDB]: There was an issue loading the estate settings.  This can happen the first time running OpenSimulator with CSharpMongoDB the first time.  OpenSimulator will probably crash, restart it and it should be good to go.");
             }
 
             if (r != null && r.Read())
@@ -188,7 +188,7 @@ namespace OpenSim.Data.MongoDB
         {
             List<string> names = new List<string>(FieldList);
 
-            using (SqliteCommand cmd = m_connection.CreateCommand())
+            using (MongoDBCommand cmd = m_connection.CreateCommand())
             {
                 if (es.EstateID < 100)
                 {
@@ -238,7 +238,7 @@ namespace OpenSim.Data.MongoDB
             foreach (string f in fields)
                 terms.Add(f+" = :"+f);
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = "update estate_settings set " + String.Join(", ", terms.ToArray()) + " where EstateID = :EstateID";
                 cmd.Parameters.AddWithValue(":EstateID", es.EstateID);
@@ -273,7 +273,7 @@ namespace OpenSim.Data.MongoDB
 
             IDataReader r;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = "select * from estateban where EstateID = :EstateID";
                 cmd.Parameters.AddWithValue(":EstateID", es.EstateID);
@@ -297,7 +297,7 @@ namespace OpenSim.Data.MongoDB
 
         private void SaveBanList(EstateSettings es)
         {
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = "delete from estateban where EstateID = :EstateID";
                 cmd.Parameters.AddWithValue(":EstateID", es.EstateID.ToString());
@@ -323,7 +323,7 @@ namespace OpenSim.Data.MongoDB
 
         void SaveUUIDList(uint EstateID, string table, UUID[] data)
         {
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = "delete from "+table+" where EstateID = :EstateID";
                 cmd.Parameters.AddWithValue(":EstateID", EstateID.ToString());
@@ -350,7 +350,7 @@ namespace OpenSim.Data.MongoDB
             List<UUID> uuids = new List<UUID>();
             IDataReader r;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = "select uuid from "+table+" where EstateID = :EstateID";
                 cmd.Parameters.AddWithValue(":EstateID", EstateID);
@@ -376,7 +376,7 @@ namespace OpenSim.Data.MongoDB
         {
             string sql = "select estate_settings."+String.Join(",estate_settings.", FieldList)+" from estate_settings where estate_settings.EstateID = :EstateID";
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = sql;
                 cmd.Parameters.AddWithValue(":EstateID", estateID.ToString());
@@ -403,7 +403,7 @@ namespace OpenSim.Data.MongoDB
             string sql = "select EstateID from estate_settings where estate_settings.EstateName = :EstateName";
             IDataReader r;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = sql;
                 cmd.Parameters.AddWithValue(":EstateName", search);
@@ -427,7 +427,7 @@ namespace OpenSim.Data.MongoDB
             string sql = "select EstateID from estate_settings";
             IDataReader r;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = sql;
 
@@ -450,7 +450,7 @@ namespace OpenSim.Data.MongoDB
             string sql = "select EstateID from estate_settings where estate_settings.EstateOwner = :EstateOwner";
             IDataReader r;
 
-            using (SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
             {
                 cmd.CommandText = sql;
                 cmd.Parameters.AddWithValue(":EstateOwner", ownerID);
@@ -469,10 +469,10 @@ namespace OpenSim.Data.MongoDB
 
         public bool LinkRegion(UUID regionID, int estateID)
         {
-            using(SqliteTransaction transaction = m_connection.BeginTransaction())
+            using(MongoDBTransaction transaction = m_connection.BeginTransaction())
             {
                 // Delete any existing estate mapping for this region.
-                using(SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using(MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = "delete from estate_map where RegionID = :RegionID";
                     cmd.Transaction = transaction;
@@ -481,7 +481,7 @@ namespace OpenSim.Data.MongoDB
                     cmd.ExecuteNonQuery();
                 }
 
-                using(SqliteCommand cmd = (SqliteCommand)m_connection.CreateCommand())
+                using(MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
                 {
                     cmd.CommandText = "insert into estate_map values (:RegionID, :EstateID)";
                     cmd.Transaction = transaction;

@@ -31,17 +31,17 @@ using System.Collections.Generic;
 using System.Data;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteUserAccountData : MongoDBGenericTableHandler<UserAccountData>, IUserAccountData
+    public class MongoDBUserAccountData : MongoDBGenericTableHandler<UserAccountData>, IUserAccountData
     {
-        public SQLiteUserAccountData(string connectionString, string realm)
+        public MongoDBUserAccountData(string connectionString, string realm)
                 : base(connectionString, realm, "UserAccount")
         {
         }
@@ -66,7 +66,7 @@ namespace OpenSim.Data.MongoDB
             if (words.Length > 2)
                 return new UserAccountData[0];
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 if (words.Length == 1)
                 {

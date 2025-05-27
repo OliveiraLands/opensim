@@ -155,7 +155,7 @@ namespace OpenSim.Data.MongoDB
         }
 
         /*
-        protected T[] DoQuery(SqliteCommand cmd)
+        protected T[] DoQuery(MongoDBCommand cmd)
         {
             IDataReader reader = ExecuteReader(cmd, m_Connection);
             if (reader == null)
@@ -221,7 +221,7 @@ namespace OpenSim.Data.MongoDB
         /*
         public virtual T[] Get(string where)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 string query = String.Format("select * from {0} where {1}",
                         m_Realm, where);

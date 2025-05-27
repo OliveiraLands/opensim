@@ -31,17 +31,17 @@ using System.Collections.Generic;
 using System.Data;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-    using Mono.Data.Sqlite;
+    using Mono.Data.MongoDB;
 #endif
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteFriendsData : MongoDBGenericTableHandler<FriendsData>, IFriendsData
+    public class MongoDBFriendsData : MongoDBGenericTableHandler<FriendsData>, IFriendsData
     {
-        public SQLiteFriendsData(string connectionString, string realm)
+        public MongoDBFriendsData(string connectionString, string realm)
             : base(connectionString, realm, "FriendsStore")
         {
         }
@@ -53,7 +53,7 @@ namespace OpenSim.Data.MongoDB
 
         public FriendsData[] GetFriends(string userID)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("select a.*,case when b.Flags is null then -1 else b.Flags end as TheirFlags from {0} as a left join {0} as b on a.PrincipalID = b.Friend and a.Friend = b.PrincipalID where a.PrincipalID = :PrincipalID", m_Realm);
                 cmd.Parameters.AddWithValue(":PrincipalID", userID.ToString());
@@ -69,7 +69,7 @@ namespace OpenSim.Data.MongoDB
 
         public override bool Delete(string principalID, string friend)
         {
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("delete from {0} where PrincipalID = :PrincipalID and Friend = :Friend", m_Realm);
                 cmd.Parameters.AddWithValue(":PrincipalID", principalID.ToString());

@@ -36,7 +36,7 @@ using OpenSim.Framework;
 
 namespace OpenSim.Data.MongoDB
 {
-    public class SQLiteAuthenticationData : MongoDBFramework, IAuthenticationData
+    public class MongoDBAuthenticationData : MongoDBFramework, IAuthenticationData
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
@@ -44,7 +44,7 @@ namespace OpenSim.Data.MongoDB
         private List<string> m_ColumnNames;
         private int m_LastExpire;
 
-        protected static SqliteConnection m_Connection;
+        protected static MongoDBConnection m_Connection;
         private static bool m_initialized = false;
 
         protected virtual Assembly Assembly
@@ -52,16 +52,16 @@ namespace OpenSim.Data.MongoDB
             get { return GetType().Assembly; }
         }
 
-        public SQLiteAuthenticationData(string connectionString, string realm)
+        public MongoDBAuthenticationData(string connectionString, string realm)
                 : base(connectionString)
         {
             m_Realm = realm;
 
             if (!m_initialized)
             {
-                DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
+                DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
 
-                m_Connection = new SqliteConnection(connectionString);
+                m_Connection = new MongoDBConnection(connectionString);
                 m_Connection.Open();
 
                 Migration m = new Migration(m_Connection, Assembly, "AuthStore");
@@ -77,9 +77,9 @@ namespace OpenSim.Data.MongoDB
             ret.Data = new Dictionary<string, object>();
             IDataReader result;
 
-            using (SqliteCommand cmd = new SqliteCommand("select * from `" + m_Realm + "` where UUID = :PrincipalID"))
+            using (MongoDBCommand cmd = new MongoDBCommand("select * from `" + m_Realm + "` where UUID = :PrincipalID"))
             {
-                cmd.Parameters.Add(new SqliteParameter(":PrincipalID", principalID.ToString()));
+                cmd.Parameters.Add(new MongoDBParameter(":PrincipalID", principalID.ToString()));
 
                 result = ExecuteReader(cmd, m_Connection);
             }
@@ -131,7 +131,7 @@ namespace OpenSim.Data.MongoDB
             foreach (object o in data.Data.Values)
                 values[i++] = o.ToString();
 
-            using (SqliteCommand cmd = new SqliteCommand())
+            using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 if (Get(data.PrincipalID) != null)
                 {
@@ -144,13 +144,13 @@ namespace OpenSim.Data.MongoDB
                         if (!first)
                             update += ", ";
                         update += "`" + field + "` = :" + field;
-                        cmd.Parameters.Add(new SqliteParameter(":" + field, data.Data[field]));
+                        cmd.Parameters.Add(new MongoDBParameter(":" + field, data.Data[field]));
 
                         first = false;
                     }
 
                     update += " where UUID = :UUID";
-                    cmd.Parameters.Add(new SqliteParameter(":UUID", data.PrincipalID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":UUID", data.PrincipalID.ToString()));
 
                     cmd.CommandText = update;
                     try
@@ -163,7 +163,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.Error("[SQLITE]: Exception storing authentication data", e);
+                        m_log.Error("[MongoDB]: Exception storing authentication data", e);
                         //CloseCommand(cmd);
                         return false;
                     }
@@ -174,9 +174,9 @@ namespace OpenSim.Data.MongoDB
                             String.Join("`, `", fields) +
                             "`) values (:UUID, :" + String.Join(", :", fields) + ")";
 
-                    cmd.Parameters.Add(new SqliteParameter(":UUID", data.PrincipalID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":UUID", data.PrincipalID.ToString()));
                     foreach (string field in fields)
-                        cmd.Parameters.Add(new SqliteParameter(":" + field, data.Data[field]));
+                        cmd.Parameters.Add(new MongoDBParameter(":" + field, data.Data[field]));
 
                     cmd.CommandText = insert;
 
@@ -200,7 +200,7 @@ namespace OpenSim.Data.MongoDB
 
         public bool SetDataItem(UUID principalID, string item, string value)
         {
-            using (SqliteCommand cmd = new SqliteCommand("update `" + m_Realm +
+            using (MongoDBCommand cmd = new MongoDBCommand("update `" + m_Realm +
                     "` set `" + item + "` = " + value + " where UUID = '" + principalID.ToString() + "'"))
             {
                 if (ExecuteNonQuery(cmd, m_Connection) > 0)
@@ -215,7 +215,7 @@ namespace OpenSim.Data.MongoDB
             if (System.Environment.TickCount - m_LastExpire > 30000)
                 DoExpire();
 
-            using (SqliteCommand cmd = new SqliteCommand("insert into tokens (UUID, token, validity) values ('" + principalID.ToString() +
+            using (MongoDBCommand cmd = new MongoDBCommand("insert into tokens (UUID, token, validity) values ('" + principalID.ToString() +
                 "', '" + token + "', datetime('now', 'localtime', '+" + lifetime.ToString() + " minutes'))"))
             {
                 if (ExecuteNonQuery(cmd, m_Connection) > 0)
@@ -230,7 +230,7 @@ namespace OpenSim.Data.MongoDB
             if (System.Environment.TickCount - m_LastExpire > 30000)
                 DoExpire();
 
-            using (SqliteCommand cmd = new SqliteCommand("update tokens set validity = datetime('now', 'localtime', '+" + lifetime.ToString() +
+            using (MongoDBCommand cmd = new MongoDBCommand("update tokens set validity = datetime('now', 'localtime', '+" + lifetime.ToString() +
                 " minutes') where UUID = '" + principalID.ToString() + "' and token = '" + token + "' and validity > datetime('now', 'localtime')"))
             {
                 if (ExecuteNonQuery(cmd, m_Connection) > 0)
@@ -242,7 +242,7 @@ namespace OpenSim.Data.MongoDB
 
         private void DoExpire()
         {
-            using (SqliteCommand cmd = new SqliteCommand("delete from tokens where validity < datetime('now', 'localtime')"))
+            using (MongoDBCommand cmd = new MongoDBCommand("delete from tokens where validity < datetime('now', 'localtime')"))
                 ExecuteNonQuery(cmd, m_Connection);
 
             m_LastExpire = System.Environment.TickCount;

@@ -32,10 +32,10 @@ using System.Drawing;
 using System.IO;
 using System.Reflection;
 using log4net;
-#if CSharpSqlite
-    using Community.CsharpSqlite.Sqlite;
+#if CSharpMongoDB
+    using Community.CsharpMongoDB.MongoDB;
 #else
-using Mono.Data.Sqlite;
+using Mono.Data.MongoDB;
 #endif
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
@@ -46,12 +46,12 @@ using OpenSim.Region.Framework.Scenes;
 namespace OpenSim.Data.MongoDB
 {
     /// <summary>
-    /// A RegionData Interface to the SQLite database
+    /// A RegionData Interface to the MongoDB database
     /// </summary>
-    public class SQLiteSimulationData : ISimulationDataStore
+    public class MongoDBSimulationData : ISimulationDataStore
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        private static readonly string LogHeader = "[REGION DB SQLITE]";
+        private static readonly string LogHeader = "[REGION DB MongoDB]";
 
         private const string primSelect = "select * from prims";
         private const string shapeSelect = "select * from primshapes";
@@ -66,18 +66,18 @@ namespace OpenSim.Data.MongoDB
         private const string regionSpawnPointsSelect = "select * from spawn_points";
 
         private DataSet ds;
-        private SqliteDataAdapter primDa;
-        private SqliteDataAdapter shapeDa;
-        private SqliteDataAdapter itemsDa;
-        private SqliteDataAdapter terrainDa;
-        private SqliteDataAdapter landDa;
-        private SqliteDataAdapter landAccessListDa;
-        private SqliteDataAdapter regionSettingsDa;
-        private SqliteDataAdapter regionWindlightDa;
-        private SqliteDataAdapter regionEnvironmentDa;
-        private SqliteDataAdapter regionSpawnPointsDa;
+        private MongoDBDataAdapter primDa;
+        private MongoDBDataAdapter shapeDa;
+        private MongoDBDataAdapter itemsDa;
+        private MongoDBDataAdapter terrainDa;
+        private MongoDBDataAdapter landDa;
+        private MongoDBDataAdapter landAccessListDa;
+        private MongoDBDataAdapter regionSettingsDa;
+        private MongoDBDataAdapter regionWindlightDa;
+        private MongoDBDataAdapter regionEnvironmentDa;
+        private MongoDBDataAdapter regionSpawnPointsDa;
 
-        private SqliteConnection m_conn;
+        private MongoDBConnection m_conn;
         private String m_connectionString;
 
         protected virtual Assembly Assembly
@@ -85,11 +85,11 @@ namespace OpenSim.Data.MongoDB
             get { return GetType().Assembly; }
         }
 
-        public SQLiteSimulationData()
+        public MongoDBSimulationData()
         {
         }
 
-        public SQLiteSimulationData(string connectionString)
+        public MongoDBSimulationData(string connectionString)
         {
             Initialise(connectionString);
         }
@@ -105,7 +105,7 @@ namespace OpenSim.Data.MongoDB
         /// <summary>
         /// <list type="bullet">
         /// <item>Initialises RegionData Interface</item>
-        /// <item>Loads and initialises a new SQLite connection and maintains it.</item>
+        /// <item>Loads and initialises a new MongoDB connection and maintains it.</item>
         /// </list>
         /// </summary>
         /// <param name="connectionString">the connection string</param>
@@ -113,46 +113,46 @@ namespace OpenSim.Data.MongoDB
         {
             try
             {
-                DllmapConfigHelper.RegisterAssembly(typeof(SqliteConnection).Assembly);
+                DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
 
                 m_connectionString = connectionString;
 
                 ds = new DataSet("Region");
 
-                m_log.Info("[SQLITE REGION DB]: Sqlite - connecting: " + connectionString);
-                m_conn = new SqliteConnection(m_connectionString);
+                m_log.Info("[MongoDB REGION DB]: MongoDB - connecting: " + connectionString);
+                m_conn = new MongoDBConnection(m_connectionString);
                 m_conn.Open();
 
-                SqliteCommand primSelectCmd = new SqliteCommand(primSelect, m_conn);
-                primDa = new SqliteDataAdapter(primSelectCmd);
+                MongoDBCommand primSelectCmd = new MongoDBCommand(primSelect, m_conn);
+                primDa = new MongoDBDataAdapter(primSelectCmd);
 
-                SqliteCommand shapeSelectCmd = new SqliteCommand(shapeSelect, m_conn);
-                shapeDa = new SqliteDataAdapter(shapeSelectCmd);
-                // SqliteCommandBuilder shapeCb = new SqliteCommandBuilder(shapeDa);
+                MongoDBCommand shapeSelectCmd = new MongoDBCommand(shapeSelect, m_conn);
+                shapeDa = new MongoDBDataAdapter(shapeSelectCmd);
+                // MongoDBCommandBuilder shapeCb = new MongoDBCommandBuilder(shapeDa);
 
-                SqliteCommand itemsSelectCmd = new SqliteCommand(itemsSelect, m_conn);
-                itemsDa = new SqliteDataAdapter(itemsSelectCmd);
+                MongoDBCommand itemsSelectCmd = new MongoDBCommand(itemsSelect, m_conn);
+                itemsDa = new MongoDBDataAdapter(itemsSelectCmd);
 
-                SqliteCommand terrainSelectCmd = new SqliteCommand(terrainSelect, m_conn);
-                terrainDa = new SqliteDataAdapter(terrainSelectCmd);
+                MongoDBCommand terrainSelectCmd = new MongoDBCommand(terrainSelect, m_conn);
+                terrainDa = new MongoDBDataAdapter(terrainSelectCmd);
 
-                SqliteCommand landSelectCmd = new SqliteCommand(landSelect, m_conn);
-                landDa = new SqliteDataAdapter(landSelectCmd);
+                MongoDBCommand landSelectCmd = new MongoDBCommand(landSelect, m_conn);
+                landDa = new MongoDBDataAdapter(landSelectCmd);
 
-                SqliteCommand landAccessListSelectCmd = new SqliteCommand(landAccessListSelect, m_conn);
-                landAccessListDa = new SqliteDataAdapter(landAccessListSelectCmd);
+                MongoDBCommand landAccessListSelectCmd = new MongoDBCommand(landAccessListSelect, m_conn);
+                landAccessListDa = new MongoDBDataAdapter(landAccessListSelectCmd);
 
-                SqliteCommand regionSettingsSelectCmd = new SqliteCommand(regionSettingsSelect, m_conn);
-                regionSettingsDa = new SqliteDataAdapter(regionSettingsSelectCmd);
+                MongoDBCommand regionSettingsSelectCmd = new MongoDBCommand(regionSettingsSelect, m_conn);
+                regionSettingsDa = new MongoDBDataAdapter(regionSettingsSelectCmd);
 
-                SqliteCommand regionWindlightSelectCmd = new SqliteCommand(regionWindlightSelect, m_conn);
-                regionWindlightDa = new SqliteDataAdapter(regionWindlightSelectCmd);
+                MongoDBCommand regionWindlightSelectCmd = new MongoDBCommand(regionWindlightSelect, m_conn);
+                regionWindlightDa = new MongoDBDataAdapter(regionWindlightSelectCmd);
 
-                SqliteCommand regionEnvironmentSelectCmd = new SqliteCommand(regionEnvironmentSelect, m_conn);
-                regionEnvironmentDa = new SqliteDataAdapter(regionEnvironmentSelectCmd);
+                MongoDBCommand regionEnvironmentSelectCmd = new MongoDBCommand(regionEnvironmentSelect, m_conn);
+                regionEnvironmentDa = new MongoDBDataAdapter(regionEnvironmentSelectCmd);
 
-                SqliteCommand regionSpawnPointsSelectCmd = new SqliteCommand(regionSpawnPointsSelect, m_conn);
-                regionSpawnPointsDa = new SqliteDataAdapter(regionSpawnPointsSelectCmd);
+                MongoDBCommand regionSpawnPointsSelectCmd = new MongoDBCommand(regionSpawnPointsSelect, m_conn);
+                regionSpawnPointsDa = new MongoDBDataAdapter(regionSpawnPointsSelectCmd);
 
                 // This actually does the roll forward assembly stuff
                 Migration m = new Migration(m_conn, Assembly, "RegionStore");
@@ -190,7 +190,7 @@ namespace OpenSim.Data.MongoDB
                     ds.Tables.Add(createRegionSpawnPointsTable());
                     setupRegionSpawnPointsCommands(regionSpawnPointsDa, m_conn);
 
-                    // WORKAROUND: This is a work around for sqlite on
+                    // WORKAROUND: This is a work around for MongoDB on
                     // windows, which gets really unhappy with blob columns
                     // that have no sample data in them.  At some point we
                     // need to actually find a proper way to handle this.
@@ -200,7 +200,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on prims table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on prims table :{0}", e.Message);
                     }
 
                     try
@@ -209,7 +209,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on primshapes table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on primshapes table :{0}", e.Message);
                     }
 
                     try
@@ -218,7 +218,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on primitems table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on primitems table :{0}", e.Message);
                     }
 
                     try
@@ -227,7 +227,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on terrain table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on terrain table :{0}", e.Message);
                     }
 
                     try
@@ -236,7 +236,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on land table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on land table :{0}", e.Message);
                     }
 
                     try
@@ -245,7 +245,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on landaccesslist table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on landaccesslist table :{0}", e.Message);
                     }
 
                     try
@@ -254,7 +254,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on regionsettings table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionsettings table :{0}", e.Message);
                     }
 
                     try
@@ -263,7 +263,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on regionwindlight table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionwindlight table :{0}", e.Message);
                     }
 
                     try
@@ -272,7 +272,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on regionenvironment table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionenvironment table :{0}", e.Message);
                     }
 
                     try
@@ -281,7 +281,7 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.ErrorFormat("[SQLITE REGION DB]: Caught fill error on spawn_points table :{0}", e.Message);
+                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on spawn_points table :{0}", e.Message);
                     }
 
                     // We have to create a data set mapping for every table, otherwise the IDataAdaptor.Update() will not populate rows with values!
@@ -301,7 +301,7 @@ namespace OpenSim.Data.MongoDB
             }
             catch (Exception e)
             {
-                m_log.ErrorFormat("[SQLITE REGION DB]: {0} - {1}", e.Message, e.StackTrace);
+                m_log.ErrorFormat("[MongoDB REGION DB]: {0} - {1}", e.Message, e.StackTrace);
                 Environment.Exit(23);
             }
             return;
@@ -404,25 +404,25 @@ namespace OpenSim.Data.MongoDB
 
                 // remove region's spawnpoints
                 using (
-                    SqliteCommand cmd =
-                        new SqliteCommand("delete from spawn_points where RegionID=:RegionID",
+                    MongoDBCommand cmd =
+                        new MongoDBCommand("delete from spawn_points where RegionID=:RegionID",
                                           m_conn))
                 {
 
-                    cmd.Parameters.Add(new SqliteParameter(":RegionID", rs.RegionUUID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionID", rs.RegionUUID.ToString()));
                     cmd.ExecuteNonQuery();
                 }
             }
 
             foreach (SpawnPoint sp in rs.SpawnPoints())
             {
-                using (SqliteCommand cmd = new SqliteCommand("insert into spawn_points(RegionID, Yaw, Pitch, Distance)" +
+                using (MongoDBCommand cmd = new MongoDBCommand("insert into spawn_points(RegionID, Yaw, Pitch, Distance)" +
                                                               "values ( :RegionID, :Yaw, :Pitch, :Distance)", m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionID", rs.RegionUUID.ToString()));
-                    cmd.Parameters.Add(new SqliteParameter(":Yaw", sp.Yaw));
-                    cmd.Parameters.Add(new SqliteParameter(":Pitch", sp.Pitch));
-                    cmd.Parameters.Add(new SqliteParameter(":Distance", sp.Distance));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionID", rs.RegionUUID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":Yaw", sp.Yaw));
+                    cmd.Parameters.Add(new MongoDBParameter(":Pitch", sp.Pitch));
+                    cmd.Parameters.Add(new MongoDBParameter(":Distance", sp.Distance));
                     cmd.ExecuteNonQuery();
                 }
             }
@@ -628,7 +628,7 @@ namespace OpenSim.Data.MongoDB
             lock (ds)
             {
                 DataRow[] primsForRegion = prims.Select(byRegion);
-//                m_log.Info("[SQLITE REGION DB]: Loaded " + primsForRegion.Length + " prims for region: " + regionUUID);
+//                m_log.Info("[MongoDB REGION DB]: Loaded " + primsForRegion.Length + " prims for region: " + regionUUID);
 
                 // First, create all groups
                 foreach (DataRow primRow in primsForRegion)
@@ -651,7 +651,7 @@ namespace OpenSim.Data.MongoDB
                             else
                             {
                                 m_log.Warn(
-                                    "[SQLITE REGION DB]: No shape found for prim in storage, so setting default box shape");
+                                    "[MongoDB REGION DB]: No shape found for prim in storage, so setting default box shape");
                                 prim.Shape = PrimitiveBaseShape.Default;
                             }
 
@@ -675,11 +675,11 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.Error("[SQLITE REGION DB]: Failed create prim object in new group, exception and data follows");
-                        m_log.Error("[SQLITE REGION DB]: ", e);
+                        m_log.Error("[MongoDB REGION DB]: Failed create prim object in new group, exception and data follows");
+                        m_log.Error("[MongoDB REGION DB]: ", e);
                         foreach (DataColumn col in prims.Columns)
                         {
-                            m_log.Error("[SQLITE REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
+                            m_log.Error("[MongoDB REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
                         }
                     }
                 }
@@ -704,7 +704,7 @@ namespace OpenSim.Data.MongoDB
                             else
                             {
                                 m_log.Warn(
-                                    "[SQLITE REGION DB]: No shape found for prim in storage, so setting default box shape");
+                                    "[MongoDB REGION DB]: No shape found for prim in storage, so setting default box shape");
                                 prim.Shape = PrimitiveBaseShape.Default;
                             }
 
@@ -714,11 +714,11 @@ namespace OpenSim.Data.MongoDB
                     }
                     catch (Exception e)
                     {
-                        m_log.Error("[SQLITE REGION DB]: Failed create prim object in group, exception and data follows");
-                        m_log.Error("[SQLITE REGION DB]: ", e);
+                        m_log.Error("[MongoDB REGION DB]: Failed create prim object in group, exception and data follows");
+                        m_log.Error("[MongoDB REGION DB]: ", e);
                         foreach (DataColumn col in prims.Columns)
                         {
-                            m_log.Error("[SQLITE REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
+                            m_log.Error("[MongoDB REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
                         }
                     }
                 }
@@ -732,21 +732,21 @@ namespace OpenSim.Data.MongoDB
         /// <param name="prim">the prim</param>
         private void LoadItems(SceneObjectPart prim)
         {
-//            m_log.DebugFormat("[SQLITE REGION DB]: Loading inventory for {0} {1}", prim.Name, prim.UUID);
+//            m_log.DebugFormat("[MongoDB REGION DB]: Loading inventory for {0} {1}", prim.Name, prim.UUID);
 
             DataTable dbItems = ds.Tables["primitems"];
             String sql = String.Format("primID = '{0}'", prim.UUID.ToString());
             DataRow[] dbItemRows = dbItems.Select(sql);
             IList<TaskInventoryItem> inventory = new List<TaskInventoryItem>();
 
-//            m_log.DebugFormat("[SQLITE REGION DB]: Found {0} items for {1} {2}", dbItemRows.Length, prim.Name, prim.UUID);
+//            m_log.DebugFormat("[MongoDB REGION DB]: Found {0} items for {1} {2}", dbItemRows.Length, prim.Name, prim.UUID);
 
             foreach (DataRow row in dbItemRows)
             {
                 TaskInventoryItem item = buildItem(row);
                 inventory.Add(item);
 
-//                m_log.DebugFormat("[SQLITE REGION DB]: Restored item {0} {1}", item.Name, item.ItemID);
+//                m_log.DebugFormat("[MongoDB REGION DB]: Restored item {0} {1}", item.Name, item.ItemID);
             }
 
             prim.Inventory.RestoreInventoryItems(inventory);
@@ -767,9 +767,9 @@ namespace OpenSim.Data.MongoDB
         {
             lock (ds)
             {
-                using (SqliteCommand cmd = new SqliteCommand("delete from terrain where RegionUUID=:RegionUUID", m_conn))
+                using (MongoDBCommand cmd = new MongoDBCommand("delete from terrain where RegionUUID=:RegionUUID", m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
                     cmd.ExecuteNonQuery();
                 }
 
@@ -784,11 +784,11 @@ namespace OpenSim.Data.MongoDB
 
                 m_log.DebugFormat("{0} Storing terrain format {1}", LogHeader, terrainDBRevision);
 
-                using (SqliteCommand cmd = new SqliteCommand(sql, m_conn))
+                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
-                    cmd.Parameters.Add(new SqliteParameter(":Revision", terrainDBRevision));
-                    cmd.Parameters.Add(new SqliteParameter(":Heightfield", terrainDBblob));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":Revision", terrainDBRevision));
+                    cmd.Parameters.Add(new MongoDBParameter(":Heightfield", terrainDBblob));
                     cmd.ExecuteNonQuery();
                 }
             }
@@ -804,9 +804,9 @@ namespace OpenSim.Data.MongoDB
             lock (ds)
             {
                 using (
-                    SqliteCommand cmd = new SqliteCommand("delete from bakedterrain where RegionUUID=:RegionUUID", m_conn))
+                    MongoDBCommand cmd = new MongoDBCommand("delete from bakedterrain where RegionUUID=:RegionUUID", m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
                     cmd.ExecuteNonQuery();
                 }
 
@@ -821,11 +821,11 @@ namespace OpenSim.Data.MongoDB
 
                 m_log.DebugFormat("{0} Storing bakedterrain format {1}", LogHeader, terrainDBRevision);
 
-                using (SqliteCommand cmd = new SqliteCommand(sql, m_conn))
+                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
-                    cmd.Parameters.Add(new SqliteParameter(":Revision", terrainDBRevision));
-                    cmd.Parameters.Add(new SqliteParameter(":Heightfield", terrainDBblob));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":Revision", terrainDBRevision));
+                    cmd.Parameters.Add(new MongoDBParameter(":Heightfield", terrainDBblob));
                     cmd.ExecuteNonQuery();
                 }
             }
@@ -855,9 +855,9 @@ namespace OpenSim.Data.MongoDB
                 String sql = "select RegionUUID, Revision, Heightfield from terrain" +
                              " where RegionUUID=:RegionUUID order by Revision desc";
 
-                using (SqliteCommand cmd = new SqliteCommand(sql, m_conn))
+                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
 
                     using (IDataReader row = cmd.ExecuteReader())
                     {
@@ -870,11 +870,11 @@ namespace OpenSim.Data.MongoDB
                         }
                         else
                         {
-                            m_log.Warn("[SQLITE REGION DB]: No terrain found for region");
+                            m_log.Warn("[MongoDB REGION DB]: No terrain found for region");
                             return null;
                         }
 
-                        m_log.Debug("[SQLITE REGION DB]: Loaded terrain revision r" + rev.ToString());
+                        m_log.Debug("[MongoDB REGION DB]: Loaded terrain revision r" + rev.ToString());
                     }
                 }
             }
@@ -890,9 +890,9 @@ namespace OpenSim.Data.MongoDB
                 String sql = "select RegionUUID, Revision, Heightfield from bakedterrain" +
                              " where RegionUUID=:RegionUUID";
 
-                using (SqliteCommand cmd = new SqliteCommand(sql, m_conn))
+                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
                 {
-                    cmd.Parameters.Add(new SqliteParameter(":RegionUUID", regionID.ToString()));
+                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
 
                     using (IDataReader row = cmd.ExecuteReader())
                     {
@@ -915,16 +915,16 @@ namespace OpenSim.Data.MongoDB
             {
                 // Can't use blanket SQL statements when using SqlAdapters unless you re-read the data into the adapter
                 // after you're done.
-                // replaced below code with the SqliteAdapter version.
-                //using (SqliteCommand cmd = new SqliteCommand("delete from land where UUID=:UUID", m_conn))
+                // replaced below code with the MongoDBAdapter version.
+                //using (MongoDBCommand cmd = new MongoDBCommand("delete from land where UUID=:UUID", m_conn))
                 //{
-                //    cmd.Parameters.Add(new SqliteParameter(":UUID", globalID.ToString()));
+                //    cmd.Parameters.Add(new MongoDBParameter(":UUID", globalID.ToString()));
                 //    cmd.ExecuteNonQuery();
                 //}
 
-                //using (SqliteCommand cmd = new SqliteCommand("delete from landaccesslist where LandUUID=:UUID", m_conn))
+                //using (MongoDBCommand cmd = new MongoDBCommand("delete from landaccesslist where LandUUID=:UUID", m_conn))
                 //{
-                //   cmd.Parameters.Add(new SqliteParameter(":UUID", globalID.ToString()));
+                //   cmd.Parameters.Add(new MongoDBParameter(":UUID", globalID.ToString()));
                 //    cmd.ExecuteNonQuery();
                 //}
 
@@ -973,9 +973,9 @@ namespace OpenSim.Data.MongoDB
                 }
 
                 // I know this caused someone issues before, but OpenSim is unusable if we leave this stuff around
-                //using (SqliteCommand cmd = new SqliteCommand("delete from landaccesslist where LandUUID=:LandUUID", m_conn))
+                //using (MongoDBCommand cmd = new MongoDBCommand("delete from landaccesslist where LandUUID=:LandUUID", m_conn))
                 //{
-                //    cmd.Parameters.Add(new SqliteParameter(":LandUUID", parcel.LandData.GlobalID.ToString()));
+                //    cmd.Parameters.Add(new MongoDBParameter(":LandUUID", parcel.LandData.GlobalID.ToString()));
                 //    cmd.ExecuteNonQuery();
 
                 //                }
@@ -1037,7 +1037,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         public void Commit()
         {
-//            m_log.Debug("[SQLITE]: Starting commit");
+//            m_log.Debug("[MongoDB]: Starting commit");
             //lock (ds) caller must lock
             {
                 primDa.Update(ds, "prims");
@@ -1053,7 +1053,7 @@ namespace OpenSim.Data.MongoDB
                     regionSettingsDa.Update(ds, "regionsettings");
                     regionWindlightDa.Update(ds, "regionwindlight");
                 }
-                catch (SqliteException SqlEx)
+                catch (MongoDBException SqlEx)
                 {
                     throw new Exception(
                         "There was a SQL error or connection string configuration error when saving the region settings.  This could be a bug, it could also happen if ConnectionString is defined in the [DatabaseService] section of StandaloneCommon.ini in the config_include folder.  This could also happen if the config_include folder doesn't exist or if the OpenSim.ini [Architecture] section isn't set.  If this is your first time running OpenSimulator, please restart the simulator and bug a developer to fix this!",
@@ -1745,7 +1745,7 @@ namespace OpenSim.Data.MongoDB
 
             if (!(row["MediaURL"] is System.DBNull))
             {
-//                m_log.DebugFormat("[SQLITE]: MediaUrl type [{0}]", row["MediaURL"].GetType());
+//                m_log.DebugFormat("[MongoDB]: MediaUrl type [{0}]", row["MediaURL"].GetType());
                 prim.MediaUrl = (string)row["MediaURL"];
             }
 
@@ -1757,7 +1757,7 @@ namespace OpenSim.Data.MongoDB
 
             if (!(row["DynAttrs"] is System.DBNull))
             {
-                //m_log.DebugFormat("[SQLITE]: DynAttrs type [{0}]", row["DynAttrs"].GetType());
+                //m_log.DebugFormat("[MongoDB]: DynAttrs type [{0}]", row["DynAttrs"].GetType());
                 prim.DynAttrs = DAMap.FromXml((string)row["DynAttrs"]);
             }
             else
@@ -1923,7 +1923,7 @@ namespace OpenSim.Data.MongoDB
             }
             catch (InvalidCastException)
             {
-                m_log.ErrorFormat("[SQLITE REGION DB]: unable to get parcel telehub settings for {1}", newData.Name);
+                m_log.ErrorFormat("[MongoDB REGION DB]: unable to get parcel telehub settings for {1}", newData.Name);
                 newData.UserLocation = Vector3.Zero;
                 newData.UserLookAt = Vector3.Zero;
             }
@@ -2374,7 +2374,7 @@ namespace OpenSim.Data.MongoDB
             row["terrain_raise_limit"] = settings.TerrainRaiseLimit;
             row["terrain_lower_limit"] = settings.TerrainLowerLimit;
             row["use_estate_sun"] = settings.UseEstateSun;
-            row["sandbox"] = settings.Sandbox; // unlike other database modules, sqlite uses a lower case s for sandbox!
+            row["sandbox"] = settings.Sandbox; // unlike other database modules, MongoDB uses a lower case s for sandbox!
             row["sunvectorx"] = settings.SunVector.X;
             row["sunvectory"] = settings.SunVector.Y;
             row["sunvectorz"] = settings.SunVector.Z;
@@ -2539,7 +2539,7 @@ namespace OpenSim.Data.MongoDB
         /// <param name="items"></param>
         public void StorePrimInventory(UUID primID, ICollection<TaskInventoryItem> items)
         {
-//            m_log.DebugFormat("[SQLITE REGION DB]: Entered StorePrimInventory with prim ID {0}", primID);
+//            m_log.DebugFormat("[MongoDB REGION DB]: Entered StorePrimInventory with prim ID {0}", primID);
 
             DataTable dbItems = ds.Tables["primitems"];
 
@@ -2590,7 +2590,7 @@ namespace OpenSim.Data.MongoDB
         /// front.  If we just have a list of b, c, etc... we can
         /// generate these strings instead of typing them out.
         /// </remarks>
-        private static SqliteCommand createInsertCommand(string table, DataTable dt)
+        private static MongoDBCommand createInsertCommand(string table, DataTable dt)
         {
             string[] cols = new string[dt.Columns.Count];
             for (int i = 0; i < dt.Columns.Count; i++)
@@ -2605,14 +2605,14 @@ namespace OpenSim.Data.MongoDB
             sql += ") values (:";
             sql += String.Join(", :", cols);
             sql += ")";
-//            m_log.DebugFormat("[SQLITE]: Created insert command {0}", sql);
-            SqliteCommand cmd = new SqliteCommand(sql);
+//            m_log.DebugFormat("[MongoDB]: Created insert command {0}", sql);
+            MongoDBCommand cmd = new MongoDBCommand(sql);
 
             // this provides the binding for all our parameters, so
             // much less code than it used to be
             foreach (DataColumn col in dt.Columns)
             {
-                cmd.Parameters.Add(createSqliteParameter(col.ColumnName, col.DataType));
+                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
             }
             return cmd;
         }
@@ -2625,7 +2625,7 @@ namespace OpenSim.Data.MongoDB
         /// <param name="pk"></param>
         /// <param name="dt"></param>
         /// <returns>the created command</returns>
-        private static SqliteCommand createUpdateCommand(string table, string pk, DataTable dt)
+        private static MongoDBCommand createUpdateCommand(string table, string pk, DataTable dt)
         {
             string sql = "update " + table + " set ";
             string subsql = String.Empty;
@@ -2640,14 +2640,14 @@ namespace OpenSim.Data.MongoDB
             }
             sql += subsql;
             sql += " where " + pk;
-            SqliteCommand cmd = new SqliteCommand(sql);
+            MongoDBCommand cmd = new MongoDBCommand(sql);
 
             // this provides the binding for all our parameters, so
             // much less code than it used to be
 
             foreach (DataColumn col in dt.Columns)
             {
-                cmd.Parameters.Add(createSqliteParameter(col.ColumnName, col.DataType));
+                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
             }
             return cmd;
         }
@@ -2659,7 +2659,7 @@ namespace OpenSim.Data.MongoDB
         /// <param name="pk"></param>
         /// <param name="dt"></param>
         /// <returns>the created command</returns>
-        private static SqliteCommand createUpdateCommand(string table, string pk1, string pk2, DataTable dt)
+        private static MongoDBCommand createUpdateCommand(string table, string pk1, string pk2, DataTable dt)
         {
             string sql = "update " + table + " set ";
             string subsql = String.Empty;
@@ -2674,14 +2674,14 @@ namespace OpenSim.Data.MongoDB
             }
             sql += subsql;
             sql += " where " + pk1 + " and " + pk2;
-            SqliteCommand cmd = new SqliteCommand(sql);
+            MongoDBCommand cmd = new MongoDBCommand(sql);
 
             // this provides the binding for all our parameters, so
             // much less code than it used to be
 
             foreach (DataColumn col in dt.Columns)
             {
-                cmd.Parameters.Add(createSqliteParameter(col.ColumnName, col.DataType));
+                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
             }
             return cmd;
         }
@@ -2702,7 +2702,7 @@ namespace OpenSim.Data.MongoDB
         //             // a map function would rock so much here
         //             subsql += ",\n";
         //         }
-        //         subsql += col.ColumnName + " " + sqliteType(col.DataType);
+        //         subsql += col.ColumnName + " " + MongoDBType(col.DataType);
         //         if (dt.PrimaryKey.Length > 0 && col == dt.PrimaryKey[0])
         //         {
         //             subsql += " primary key";
@@ -2724,7 +2724,7 @@ namespace OpenSim.Data.MongoDB
 
         ///<summary>
         /// This is a convenience function that collapses 5 repetitive
-        /// lines for defining SqliteParameters to 2 parameters:
+        /// lines for defining MongoDBParameters to 2 parameters:
         /// column name and database type.
         ///
         /// It assumes certain conventions like :param as the param
@@ -2732,10 +2732,10 @@ namespace OpenSim.Data.MongoDB
         /// version is always current version, both of which are fine
         /// for us.
         ///</summary>
-        ///<returns>a built sqlite parameter</returns>
-        private static SqliteParameter createSqliteParameter(string name, Type type)
+        ///<returns>a built MongoDB parameter</returns>
+        private static MongoDBParameter createMongoDBParameter(string name, Type type)
         {
-            SqliteParameter param = new SqliteParameter();
+            MongoDBParameter param = new MongoDBParameter();
             param.ParameterName = ":" + name;
             param.DbType = dbtypeFromType(type);
             param.SourceColumn = name;
@@ -2748,7 +2748,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupPrimCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupPrimCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("prims", ds.Tables["prims"]);
             da.InsertCommand.Connection = conn;
@@ -2756,8 +2756,8 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand = createUpdateCommand("prims", "UUID=:UUID", ds.Tables["prims"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from prims where UUID = :UUID");
-            delete.Parameters.Add(createSqliteParameter("UUID", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from prims where UUID = :UUID");
+            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
             delete.Connection = conn;
             da.DeleteCommand = delete;
         }
@@ -2767,7 +2767,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupItemsCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupItemsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("primitems", ds.Tables["primitems"]);
             da.InsertCommand.Connection = conn;
@@ -2775,8 +2775,8 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand = createUpdateCommand("primitems", "itemID = :itemID", ds.Tables["primitems"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from primitems where itemID = :itemID");
-            delete.Parameters.Add(createSqliteParameter("itemID", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from primitems where itemID = :itemID");
+            delete.Parameters.Add(createMongoDBParameter("itemID", typeof(String)));
             delete.Connection = conn;
             da.DeleteCommand = delete;
         }
@@ -2786,7 +2786,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupTerrainCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupTerrainCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("terrain", ds.Tables["terrain"]);
             da.InsertCommand.Connection = conn;
@@ -2797,7 +2797,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupLandCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupLandCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("land", ds.Tables["land"]);
             da.InsertCommand.Connection = conn;
@@ -2805,8 +2805,8 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand = createUpdateCommand("land", "UUID=:UUID", ds.Tables["land"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from land where UUID=:UUID");
-            delete.Parameters.Add(createSqliteParameter("UUID", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from land where UUID=:UUID");
+            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
             da.DeleteCommand = delete;
             da.DeleteCommand.Connection = conn;
         }
@@ -2816,7 +2816,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupLandAccessCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupLandAccessCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("landaccesslist", ds.Tables["landaccesslist"]);
             da.InsertCommand.Connection = conn;
@@ -2824,14 +2824,14 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand = createUpdateCommand("landaccesslist", "LandUUID=:landUUID", "AccessUUID=:AccessUUID", ds.Tables["landaccesslist"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from landaccesslist where LandUUID= :LandUUID and AccessUUID= :AccessUUID");
-            delete.Parameters.Add(createSqliteParameter("LandUUID", typeof(String)));
-            delete.Parameters.Add(createSqliteParameter("AccessUUID", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from landaccesslist where LandUUID= :LandUUID and AccessUUID= :AccessUUID");
+            delete.Parameters.Add(createMongoDBParameter("LandUUID", typeof(String)));
+            delete.Parameters.Add(createMongoDBParameter("AccessUUID", typeof(String)));
             da.DeleteCommand = delete;
             da.DeleteCommand.Connection = conn;
         }
 
-        private void setupRegionSettingsCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupRegionSettingsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("regionsettings", ds.Tables["regionsettings"]);
             da.InsertCommand.Connection = conn;
@@ -2844,7 +2844,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupRegionWindlightCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupRegionWindlightCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("regionwindlight", ds.Tables["regionwindlight"]);
             da.InsertCommand.Connection = conn;
@@ -2852,20 +2852,20 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand.Connection = conn;
         }
 
-        private void setupRegionEnvironmentCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupRegionEnvironmentCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("regionenvironment", ds.Tables["regionenvironment"]);
             da.InsertCommand.Connection = conn;
             da.UpdateCommand = createUpdateCommand("regionenvironment", "region_id=:region_id", ds.Tables["regionenvironment"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from regionenvironment where region_id= :region_id");
-            delete.Parameters.Add(createSqliteParameter("region_id", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from regionenvironment where region_id= :region_id");
+            delete.Parameters.Add(createMongoDBParameter("region_id", typeof(String)));
             da.DeleteCommand = delete;
             da.DeleteCommand.Connection = conn;
         }
 
-        private void setupRegionSpawnPointsCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupRegionSpawnPointsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("spawn_points", ds.Tables["spawn_points"]);
             da.InsertCommand.Connection = conn;
@@ -2878,7 +2878,7 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         /// <param name="da"></param>
         /// <param name="conn"></param>
-        private void setupShapeCommands(SqliteDataAdapter da, SqliteConnection conn)
+        private void setupShapeCommands(MongoDBDataAdapter da, MongoDBConnection conn)
         {
             da.InsertCommand = createInsertCommand("primshapes", ds.Tables["primshapes"]);
             da.InsertCommand.Connection = conn;
@@ -2886,8 +2886,8 @@ namespace OpenSim.Data.MongoDB
             da.UpdateCommand = createUpdateCommand("primshapes", "UUID=:UUID", ds.Tables["primshapes"]);
             da.UpdateCommand.Connection = conn;
 
-            SqliteCommand delete = new SqliteCommand("delete from primshapes where UUID = :UUID");
-            delete.Parameters.Add(createSqliteParameter("UUID", typeof(String)));
+            MongoDBCommand delete = new MongoDBCommand("delete from primshapes where UUID = :UUID");
+            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
             delete.Connection = conn;
             da.DeleteCommand = delete;
         }
