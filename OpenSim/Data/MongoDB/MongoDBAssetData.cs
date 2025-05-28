@@ -49,13 +49,7 @@ namespace OpenSim.Data.MongoDB
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        private const string SelectAssetSQL = "select * from assets where UUID=:UUID";
-        private const string SelectAssetMetadataSQL = "select Name, Description, Type, Temporary, asset_flags, UUID, CreatorID,hash from assets limit :start, :count";
-        private const string DeleteAssetSQL = "delete from assets where UUID=:UUID";
-        private const string InsertAssetSQL = "insert into assets(UUID, Name, Description, Type, Local, Temporary, asset_flags, CreatorID, Data, hash) values(:UUID, :Name, :Description, :Type, :Local, :Temporary, :Flags, :CreatorID, :Data, :hash)";
-        private const string UpdateAssetSQL = "update assets set Name=:Name, Description=:Description, Type=:Type, Local=:Local, Temporary=:Temporary, asset_flags=:Flags, CreatorID=:CreatorID, Data=:Data, Hash=:hash where UUID=:UUID";
-        private const string assetSelect = "select * from assets";
-
+        protected MongoDBGenericTableHandler<AssetBase> m_assetbase;
         protected static MongoClient m_Connection;
         protected static IMongoDatabase m_mongoDatabase;
         private   IMongoCollection<AssetBase> _collection;
@@ -83,7 +77,9 @@ namespace OpenSim.Data.MongoDB
         /// <param name="dbconnect">connect string</param>
         override public void Initialise(string dbconnect)
         {
+            m_assetbase = new MongoDBGenericTableHandler<AssetBase>(dbconnect, storeName, storeName, "FullID");
 
+            /*
             var mongoUrl = new MongoUrl(dbconnect);
             m_Connection = new MongoClient(dbconnect);
 
@@ -109,7 +105,7 @@ namespace OpenSim.Data.MongoDB
                       .SetIdGenerator(StringObjectIdGenerator.Instance); // Pode mudar o gerador conforme o tipo do campo
                 });
             }
-
+            */
             return;
         }
 
@@ -122,11 +118,14 @@ namespace OpenSim.Data.MongoDB
         {
             lock (this)
             {
-               AssetBase retorno = _collection.Find(x => x.FullID == uuid)
-                    .FirstOrDefaultAsync()
-                    .Result;
+               AssetBase m_return = m_assetbase.Get("FullID", uuid.ToString()).FirstOrDefault();
 
-                return retorno ?? null;
+                // If not found, try to fetch from MongoDB
+                /*AssetBase retorno = _collection.Find(x => x.FullID == uuid)
+                    .FirstOrDefaultAsync()
+                    .Result;*/
+
+                return m_return ?? null;
             }
         }
 
@@ -134,7 +133,7 @@ namespace OpenSim.Data.MongoDB
         /// Create an asset
         /// </summary>
         /// <param name="asset">Asset Base</param>
-        override public async Task<bool> StoreAsset(AssetBase asset)
+        override public bool StoreAsset(AssetBase asset)
         {
             string assetName = asset.Name;
             if (asset.Name.Length > AssetBase.MAX_ASSET_NAME)
@@ -154,31 +153,33 @@ namespace OpenSim.Data.MongoDB
                     asset.Description, asset.ID, asset.Description.Length, assetDescription.Length);
             }
 
+            return m_assetbase.Store(asset);
+            /*
             var filter = Builders<AssetBase>.Filter.Eq(a => a.FullID, asset.FullID);
             var options = new ReplaceOptions { IsUpsert = true };
 
             // Atualizar registro existente (ou inserir se IsUpsert for true)
             var result = _collection.ReplaceOneAsync(filter, asset, options).Result;
-
             return result.IsAcknowledged && (result.ModifiedCount > 0 || result.UpsertedId != null);
+            */
         }
 
-//        /// <summary>
-//        /// Some... logging functionnality
-//        /// </summary>
-//        /// <param name="asset"></param>
-//        private static void LogAssetLoad(AssetBase asset)
-//        {
-//            string temporary = asset.Temporary ? "Temporary" : "Stored";
-//            string local = asset.Local ? "Local" : "Remote";
-//
-//            int assetLength = (asset.Data != null) ? asset.Data.Length : 0;
-//
-//            m_log.Debug("[ASSET DB]: " +
-//                                     string.Format("Loaded {5} {4} Asset: [{0}][{3}] \"{1}\":{2} ({6} bytes)",
-//                                                   asset.FullID, asset.Name, asset.Description, asset.Type,
-//                                                   temporary, local, assetLength));
-//        }
+        //        /// <summary>
+        //        /// Some... logging functionnality
+        //        /// </summary>
+        //        /// <param name="asset"></param>
+        //        private static void LogAssetLoad(AssetBase asset)
+        //        {
+        //            string temporary = asset.Temporary ? "Temporary" : "Stored";
+        //            string local = asset.Local ? "Local" : "Remote";
+        //
+        //            int assetLength = (asset.Data != null) ? asset.Data.Length : 0;
+        //
+        //            m_log.Debug("[ASSET DB]: " +
+        //                                     string.Format("Loaded {5} {4} Asset: [{0}][{3}] \"{1}\":{2} ({6} bytes)",
+        //                                                   asset.FullID, asset.Name, asset.Description, asset.Type,
+        //                                                   temporary, local, assetLength));
+        //        }
 
         /// <summary>
         /// Check if the assets exist in the database.
@@ -187,6 +188,16 @@ namespace OpenSim.Data.MongoDB
         /// <returns>For each asset: true if it exists, false otherwise</returns>
         public override bool[] AssetsExist(UUID[] uuids)
         {
+            if (uuids.Length == 0)
+                return Array.Empty<bool>();
+
+            // Converte os UUIDs para strings (ajuste se for GUID ou outro tipo no MongoDB)
+            var stringUuids = uuids.Select(u => u.ToString()).ToArray();
+
+            // Chama a rotina genérica
+            return m_assetbase.ItemsExist<AssetBase>(stringUuids, a => a.FullID, _collection);
+
+            /*
             if (uuids.Length == 0)
                 return new bool[0];
 
@@ -219,6 +230,7 @@ namespace OpenSim.Data.MongoDB
             }
 
             return results;
+            */
         }
 
         /// <summary>
@@ -302,7 +314,7 @@ namespace OpenSim.Data.MongoDB
                                                  Hash = assetBase.Hash
                                              })
                                              .ToListAsync()
-                                             .Result; // Executa a consulta e retorna a lista
+                                             .GetAwaiter().GetResult(); // Executa a consulta e retorna a lista
 
             }
 
@@ -363,6 +375,8 @@ namespace OpenSim.Data.MongoDB
         {
             lock (this)
             {
+                return m_assetbase.Delete("FullID", uuid.ToString());
+                /*
                 var filter = Builders<AssetBase>.Filter.Eq(a => a.FullID.ToString(), uuid.ToString());
 
                 // Executa a operação de exclusão de um único documento
@@ -370,6 +384,7 @@ namespace OpenSim.Data.MongoDB
 
                 // Retorna true se um documento foi excluído (DeletedCount > 0)
                 return result.DeletedCount > 0;
+                */
             }
         }
 

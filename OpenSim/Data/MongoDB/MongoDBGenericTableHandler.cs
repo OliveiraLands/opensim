@@ -38,20 +38,16 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace OpenSim.Data.MongoDB
 {
-    public class MongoDBGenericTableHandler<T> : MongoDBFramework where T: class, new()
+    public class MongoDBGenericTableHandler<T> : MongoDBFramework where T : class, new()
     {
-//        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        protected Dictionary<string, FieldInfo> m_Fields =
-                new Dictionary<string, FieldInfo>();
-
-        protected List<string> m_ColumnNames = null;
         protected string m_Realm;
-        protected FieldInfo m_DataField = null;
 
         protected static MongoClient m_Connection;
         protected static IMongoDatabase m_mongoDatabase;
@@ -112,22 +108,6 @@ namespace OpenSim.Data.MongoDB
                     cm.MapIdMember(propInfo)
                       .SetIdGenerator(StringObjectIdGenerator.Instance); // Pode mudar o gerador conforme o tipo do campo
                 });
-            }
-        }
-
-        private void CheckColumnNames(IDataReader reader)
-        {
-            if (m_ColumnNames != null)
-                return;
-
-            m_ColumnNames = new List<string>();
-
-            DataTable schemaTable = reader.GetSchemaTable();
-            foreach (DataRow row in schemaTable.Rows)
-            {
-                if (row["ColumnName"] != null &&
-                        (!m_Fields.ContainsKey(row["ColumnName"].ToString())))
-                    m_ColumnNames.Add(row["ColumnName"].ToString());
             }
         }
 
@@ -290,5 +270,45 @@ namespace OpenSim.Data.MongoDB
 
             return result.DeletedCount > 0;
         }
+
+        public bool[] ItemsExist<T>(IEnumerable<string> ids, Expression<Func<T, object>> idField, IMongoCollection<T> collection)
+        {
+            if (ids == null || !ids.Any())
+                return Array.Empty<bool>();
+
+            // Cria filtro para verificar se o campo de ID está contido na lista
+            var filter = Builders<T>.Filter.In(idField, ids);
+
+            // Projeta apenas o campo de ID
+            var projection = Builders<T>.Projection.Include(idField);
+
+            // Executa a consulta no MongoDB
+            var existingDocs = collection
+                .Find(filter)
+                .Project(projection)
+                .ToList();
+
+            // Extrai os valores do campo de ID retornados
+            var existingIds = new HashSet<string>();
+            foreach (var doc in existingDocs)
+            {
+                if (doc.Contains("_id"))
+                    existingIds.Add(doc["_id"].ToString());
+                else
+                    existingIds.Add(doc.GetValue("FullID", "").ToString());
+            }
+
+            // Verifica quais IDs existem
+            return ids.Select(id => existingIds.Contains(id)).ToArray();
+        }
+        public bool ItemExists<T>(string id, Expression<Func<T, object>> idField, IMongoCollection<T> collection)
+        {
+            // Reutiliza a rotina para múltiplos, passando apenas um valor
+            var resultArray = ItemsExist<T>(new[] { id }, idField, collection);
+
+            // Retorna o primeiro (e único) resultado
+            return resultArray.Length > 0 && resultArray[0];
+        }
+
     }
 }

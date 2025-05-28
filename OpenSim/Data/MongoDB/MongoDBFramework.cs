@@ -42,9 +42,17 @@ namespace OpenSim.Data.MongoDB
     {
         protected Object m_lockObject = new Object();
 
+        protected static MongoClient m_Connection;
+        protected static IMongoDatabase m_mongoDatabase;
+
         protected MongoDBFramework(string connectionString)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(MongoClient).Assembly);
+            var mongoUrl = new MongoUrl(connectionString);
+
+            m_Connection = new MongoClient(connectionString);
+            //Console.WriteLine(string.Format("OPENING CONNECTION FOR {0} USING {1}", storeName, connectionString));
+
+            m_mongoDatabase = m_Connection.GetDatabase(mongoUrl.DatabaseName);
         }
 
         //////////////////////////////////////////////////////////////

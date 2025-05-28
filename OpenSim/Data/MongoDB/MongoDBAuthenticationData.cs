@@ -44,7 +44,6 @@ namespace OpenSim.Data.MongoDB
         private List<string> m_ColumnNames;
         private int m_LastExpire;
 
-        protected static MongoDBConnection m_Connection;
         private static bool m_initialized = false;
 
         protected virtual Assembly Assembly
@@ -59,8 +58,7 @@ namespace OpenSim.Data.MongoDB
 
             if (!m_initialized)
             {
-                DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
-
+                
                 m_Connection = new MongoDBConnection(connectionString);
                 m_Connection.Open();
 
