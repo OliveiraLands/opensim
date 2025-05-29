@@ -50,8 +50,8 @@ namespace OpenSim.Data.MongoDB
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         protected MongoDBGenericTableHandler<AssetBase> m_assetbase;
-        protected static MongoClient m_Connection;
-        protected static IMongoDatabase m_mongoDatabase;
+        // protected static MongoClient m_Connection;
+        // protected static IMongoDatabase m_mongoDatabase;
         private   IMongoCollection<AssetBase> _collection;
 
         private const string storeName = "Assets";
@@ -63,8 +63,6 @@ namespace OpenSim.Data.MongoDB
 
         override public void Dispose()
         {
-            m_Connection = null;
-            m_mongoDatabase = null;
         }
 
         /// <summary>

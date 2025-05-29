@@ -25,20 +25,24 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+using log4net;
+using OpenMetaverse;
+using OpenSim.Framework;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Reflection;
-using log4net;
-using OpenMetaverse;
-using OpenSim.Framework;
+using System.Security.Cryptography.X509Certificates;
 
 namespace OpenSim.Data.MongoDB
 {
     public class MongoDBAuthenticationData : MongoDBFramework, IAuthenticationData
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
+        protected MongoDBGenericTableHandler<AuthenticationData> m_authdata;
 
         private string m_Realm;
         private List<string> m_ColumnNames;
@@ -56,144 +60,20 @@ namespace OpenSim.Data.MongoDB
         {
             m_Realm = realm;
 
-            if (!m_initialized)
-            {
-                
-                m_Connection = new MongoDBConnection(connectionString);
-                m_Connection.Open();
+            m_authdata = new MongoDBGenericTableHandler<AuthenticationData>(connectionString, realm, realm, "PrincipalID");
 
-                Migration m = new Migration(m_Connection, Assembly, "AuthStore");
-                m.Update();
-
-                m_initialized = true;
-            }
         }
 
         public AuthenticationData Get(UUID principalID)
         {
-            AuthenticationData ret = new AuthenticationData();
-            ret.Data = new Dictionary<string, object>();
-            IDataReader result;
+            AuthenticationData ret = m_authdata.Get("PrincipalID", principalID.ToString())?.First();
 
-            using (MongoDBCommand cmd = new MongoDBCommand("select * from `" + m_Realm + "` where UUID = :PrincipalID"))
-            {
-                cmd.Parameters.Add(new MongoDBParameter(":PrincipalID", principalID.ToString()));
-
-                result = ExecuteReader(cmd, m_Connection);
-            }
-
-            try
-            {
-                if (result.Read())
-                {
-                    ret.PrincipalID = principalID;
-
-                    if (m_ColumnNames == null)
-                    {
-                        m_ColumnNames = new List<string>();
-
-                        DataTable schemaTable = result.GetSchemaTable();
-                        foreach (DataRow row in schemaTable.Rows)
-                            m_ColumnNames.Add(row["ColumnName"].ToString());
-                    }
-
-                    foreach (string s in m_ColumnNames)
-                    {
-                        if (s == "UUID")
-                            continue;
-
-                        ret.Data[s] = result[s].ToString();
-                    }
-
-                    return ret;
-                }
-                else
-                {
-                    return null;
-                }
-            }
-            catch
-            {
-            }
-
-            return null;
+            return ret ?? null;
         }
 
         public bool Store(AuthenticationData data)
         {
-            data.Data.Remove("UUID");
-
-            string[] fields = new List<string>(data.Data.Keys).ToArray();
-            string[] values = new string[data.Data.Count];
-            int i = 0;
-            foreach (object o in data.Data.Values)
-                values[i++] = o.ToString();
-
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                if (Get(data.PrincipalID) != null)
-                {
-
-
-                    string update = "update `" + m_Realm + "` set ";
-                    bool first = true;
-                    foreach (string field in fields)
-                    {
-                        if (!first)
-                            update += ", ";
-                        update += "`" + field + "` = :" + field;
-                        cmd.Parameters.Add(new MongoDBParameter(":" + field, data.Data[field]));
-
-                        first = false;
-                    }
-
-                    update += " where UUID = :UUID";
-                    cmd.Parameters.Add(new MongoDBParameter(":UUID", data.PrincipalID.ToString()));
-
-                    cmd.CommandText = update;
-                    try
-                    {
-                        if (ExecuteNonQuery(cmd, m_Connection) < 1)
-                        {
-                            //CloseCommand(cmd);
-                            return false;
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.Error("[MongoDB]: Exception storing authentication data", e);
-                        //CloseCommand(cmd);
-                        return false;
-                    }
-                }
-                else
-                {
-                    string insert = "insert into `" + m_Realm + "` (`UUID`, `" +
-                            String.Join("`, `", fields) +
-                            "`) values (:UUID, :" + String.Join(", :", fields) + ")";
-
-                    cmd.Parameters.Add(new MongoDBParameter(":UUID", data.PrincipalID.ToString()));
-                    foreach (string field in fields)
-                        cmd.Parameters.Add(new MongoDBParameter(":" + field, data.Data[field]));
-
-                    cmd.CommandText = insert;
-
-                    try
-                    {
-                        if (ExecuteNonQuery(cmd, m_Connection) < 1)
-                        {
-                            return false;
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine(e.ToString());
-                        return false;
-                    }
-                }
-            }
-
-            return true;
+            return m_authdata.Store(data);
         }
 
         public bool SetDataItem(UUID principalID, string item, string value)
