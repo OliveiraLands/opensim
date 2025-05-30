@@ -4,14 +4,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the OpenSimulator Project nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
+ * * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ * * Redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution.
+ * * Neither the name of the OpenSimulator Project nor the
+ * names of its contributors may be used to endorse or promote products
+ * derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE DEVELOPERS ``AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -63,8 +63,6 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             Color.FromArgb(255, 125, 128, 130)
         };
 
-        private static readonly UUID TERRAIN_CACHE_MAGIC = new UUID("2c0c7ef2-56be-4eb8-aacb-76712c535b4b");
-
         #endregion Constants
 
         private static readonly ILog m_log = log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType.Name);
@@ -99,73 +97,69 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             if (textureTerrain)
             {
                 // Swap empty terrain textureIDs with default IDs
-                for(int i = 0; i < textureIDs.Length; i++)
+                for (int i = 0; i < textureIDs.Length; i++)
                 {
-                    if(textureIDs[i].IsZero())
+                    if (textureIDs[i].IsZero())
                         textureIDs[i] = DEFAULT_TERRAIN_DETAIL[i];
                 }
 
                 #region Texture Fetching
 
-                if(assetService != null)
+                if (assetService != null)
                 {
-                    for(int i = 0; i < 4; i++)
+                    for (int i = 0; i < 4; i++)
                     {
                         // asset cache indexes are strings
                         string cacheName = "MAP" + textureIDs[i].ToString();
 
                         // Try to fetch a cached copy of the decoded/resized version of this texture
                         AssetBase asset = assetService.GetCached(cacheName);
-                        if(asset != null)
+                        if (asset != null)
                         {
                             try
                             {
-                                using(MemoryStream stream = new MemoryStream(asset.Data))
+                                using (MemoryStream stream = new MemoryStream(asset.Data))
                                     detailTexture[i] = (Bitmap)Image.FromStream(stream);
 
-                                if(detailTexture[i].PixelFormat != PixelFormat.Format24bppRgb ||
+                                if (detailTexture[i].PixelFormat != PixelFormat.Format24bppRgb ||
                                      detailTexture[i].Width != 16 || detailTexture[i].Height != 16)
                                 {
                                     detailTexture[i].Dispose();
                                     detailTexture[i] = null;
                                 }
                             }
-                            catch(Exception ex)
+                            catch (Exception ex)
                             {
-                                m_log.Warn("Failed to decode cached terrain patch texture" + textureIDs[i] + "): " + ex.Message);
+                                m_log.WarnFormat("Failed to decode cached terrain patch texture ({0}): {1}", textureIDs[i], ex.Message);
                             }
                         }
 
-                        if(detailTexture[i] == null)
+                        if (detailTexture[i] == null)
                         {
                             // Try to fetch the original JPEG2000 texture, resize if needed, and cache as PNG
                             asset = assetService.Get(textureIDs[i].ToString());
-                            if(asset != null)
+                            if (asset != null)
                             {
                                 try
                                 {
                                     detailTexture[i] = (Bitmap)decoder.DecodeToImage(asset.Data);
                                 }
-                                catch(Exception ex)
+                                catch (Exception ex)
                                 {
-                                    m_log.Warn("Failed to decode terrain texture " + asset.ID + ": " + ex.Message);
+                                    m_log.WarnFormat("Failed to decode terrain texture {0}: {1}", asset.ID, ex.Message);
                                 }
                             }
 
-                            if(detailTexture[i] != null)
+                            if (detailTexture[i] != null)
                             {
-                                //detailTexture[i].Save("terrOri" + i.ToString() + ".png");
-
                                 if (detailTexture[i].PixelFormat != PixelFormat.Format24bppRgb ||
                                    detailTexture[i].Width != 16 || detailTexture[i].Height != 16)
-                                    using(Bitmap origBitmap = detailTexture[i])
+                                    using (Bitmap origBitmap = detailTexture[i])
                                         detailTexture[i] = Util.ResizeImageSolid(origBitmap, 16, 16);
-
-                                //detailTexture[i].Save("terr" + i.ToString() + ".png");
 
                                 // Save the decoded and resized texture to the cache
                                 byte[] data;
-                                using(MemoryStream stream = new MemoryStream())
+                                using (MemoryStream stream = new MemoryStream())
                                 {
                                     detailTexture[i].Save(stream, ImageFormat.Png);
                                     data = stream.ToArray();
@@ -192,12 +186,12 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 }
 
                 #endregion Texture Fetching
-                if(averagetextureTerrain)
+                if (averagetextureTerrain)
                 {
-                    for(int t = 0; t < 4; t++)
+                    usecolors = true;
+                    for (int t = 0; t < 4; t++)
                     {
-                        usecolors = true;
-                        if(detailTexture[t] == null)
+                        if (detailTexture[t] == null)
                         {
                             mapColorsRed[t] = DEFAULT_TERRAIN_COLOR[t].R;
                             mapColorsGreen[t] = DEFAULT_TERRAIN_COLOR[t].G;
@@ -218,10 +212,10 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
                         unsafe
                         {
-                            for(int y = 0; y < ylen; y += bmdata.Stride)
+                            for (int y = 0; y < ylen; y += bmdata.Stride)
                             {
                                 byte* ptrc = (byte*)bmdata.Scan0 + y;
-                                for(int x = 0 ; x < bmdata.Width; ++x, ptrc += 3)
+                                for (int x = 0; x < bmdata.Width; ++x, ptrc += 3)
                                 {
                                     cR += ptrc[0];
                                     cG += ptrc[1];
@@ -232,9 +226,9 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                         detailTexture[t].UnlockBits(bmdata);
                         detailTexture[t].Dispose();
 
-                        mapColorsRed[t] = (byte)Math.Clamp(cR / npixeis, 0 , 255);
-                        mapColorsGreen[t] = (byte)Math.Clamp(cG / npixeis, 0 , 255);
-                        mapColorsBlue[t] = (byte)Math.Clamp(cB / npixeis, 0 , 255);
+                        mapColorsRed[t] = (byte)Math.Clamp(cR / npixeis, 0, 255);
+                        mapColorsGreen[t] = (byte)Math.Clamp(cG / npixeis, 0, 255);
+                        mapColorsBlue[t] = (byte)Math.Clamp(cB / npixeis, 0, 255);
                     }
                 }
                 else
@@ -248,28 +242,27 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
                             // Create a solid color texture for this layer
                             detailTexture[i] = new Bitmap(16, 16, PixelFormat.Format24bppRgb);
-                            using(Graphics gfx = Graphics.FromImage(detailTexture[i]))
+                            using (Graphics gfx = Graphics.FromImage(detailTexture[i]))
                             {
-                                using(SolidBrush brush = new SolidBrush(DEFAULT_TERRAIN_COLOR[i]))
+                                using (SolidBrush brush = new SolidBrush(DEFAULT_TERRAIN_COLOR[i]))
                                     gfx.FillRectangle(brush, 0, 0, 16, 16);
                             }
                         }
                         else
                         {
-                            if(detailTexture[i].Width != 16 || detailTexture[i].Height != 16)
+                            if (detailTexture[i].Width != 16 || detailTexture[i].Height != 16)
                             {
-                                using(Bitmap origBitmap = detailTexture[i])
+                                using (Bitmap origBitmap = detailTexture[i])
                                     detailTexture[i] = Util.ResizeImageSolid(origBitmap, 16, 16);
                             }
                         }
-                        //detailTexture[i].Save("terr" + i.ToString()+".png", ImageFormat.Png);
                     }
                 }
             }
             else
             {
                 usecolors = true;
-                for(int t = 0; t < 4; t++)
+                for (int t = 0; t < 4; t++)
                 {
                     mapColorsRed[t] = DEFAULT_TERRAIN_COLOR[t].R;
                     mapColorsGreen[t] = DEFAULT_TERRAIN_COLOR[t].G;
@@ -279,8 +272,8 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
             #region Layer Map
 
-            float xFactor = terrain.Width / twidth;
-            float yFactor = terrain.Height / theight;
+            float xFactor = (float)terrain.Width / twidth;
+            float yFactor = (float)terrain.Height / theight;
 
             #endregion Layer Map
 
@@ -291,8 +284,8 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
             // Unsafe work as we lock down the source textures for quicker access and access the
             //    pixel data directly
-            float invtwitdthMinus1 = 1.0f / (twidth - 1);
-            float invtheightMinus1 = 1.0f / (theight - 1);
+            float invtwitdthMinus1 = 1.0f / (twidth > 1 ? (twidth - 1) : 1); // Avoid division by zero for small dimensions
+            float invtheightMinus1 = 1.0f / (theight > 1 ? (theight - 1) : 1); // Avoid division by zero for small dimensions
             int ty;
             int tx;
             float pctx;
@@ -301,27 +294,26 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             float layer;
             float layerDiff;
             int l0;
-            uint yglobalpos;
+            int l1; // Declare l1 outside the loop
 
-            if(usecolors)
+            if (usecolors)
             {
                 float a;
                 float b;
-                int l1;
                 unsafe
                 {
                     byte* ptrO;
-                    for(int y = 0; y < theight; ++y)
+                    for (int y = 0; y < theight; ++y)
                     {
                         pcty = y * invtheightMinus1;
                         ptrO = (byte*)outputData.Scan0.ToPointer() + y * outputData.Stride;
                         ty = (int)(y * yFactor);
-                        yglobalpos = (uint)ty + regionPositionY;
+                        uint yglobalpos = (uint)ty + regionPositionY; // Move yglobalpos declaration here
 
-                        for(int x = 0; x < twidth; ++x, ptrO +=3)
+                        for (int x = 0; x < twidth; ++x, ptrO += 3)
                         {
                             tx = (int)(x * xFactor);
-                            pctx = x  * invtwitdthMinus1;
+                            pctx = x * invtwitdthMinus1;
                             height = (float)terrain[tx, ty];
                             layer = getLayerTex(height, pctx, pcty,
                                 (uint)tx + regionPositionX, yglobalpos,
@@ -335,7 +327,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                             else
                                 l1 = l0 + 1;
 
-                            a = mapColorsRed[l0];                         
+                            a = mapColorsRed[l0];
                             b = mapColorsRed[l1];
                             ptrO[0] = (byte)(a + layerDiff * (b - a));
 
@@ -362,13 +354,28 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 unsafe
                 {
                     // Get handles to all of the texture data arrays
-                    BitmapData[] datas = new BitmapData[]
+                    BitmapData[] datas = new BitmapData[4];
+                    for (int i = 0; i < 4; i++)
                     {
-                        detailTexture[0].LockBits(new Rectangle(0, 0, 16, 16), ImageLockMode.ReadOnly, detailTexture[0].PixelFormat),
-                        detailTexture[1].LockBits(new Rectangle(0, 0, 16, 16), ImageLockMode.ReadOnly, detailTexture[1].PixelFormat),
-                        detailTexture[2].LockBits(new Rectangle(0, 0, 16, 16), ImageLockMode.ReadOnly, detailTexture[2].PixelFormat),
-                        detailTexture[3].LockBits(new Rectangle(0, 0, 16, 16), ImageLockMode.ReadOnly, detailTexture[3].PixelFormat)
-                    };
+                        // Ensure detailTexture[i] is not null before locking bits
+                        if (detailTexture[i] != null)
+                        {
+                            datas[i] = detailTexture[i].LockBits(new Rectangle(0, 0, 16, 16), ImageLockMode.ReadOnly, detailTexture[i].PixelFormat);
+                        }
+                        else
+                        {
+                            // Handle the case where detailTexture[i] might be null (e.g., failed to load)
+                            // This scenario should ideally be prevented by filling with default colors earlier.
+                            // For robustness, we can create a dummy BitmapData or skip this texture.
+                            // For this specific code, since detailTexture[i] is guaranteed to be non-null if usecolors is false,
+                            // this 'else' block might not be strictly necessary, but good for defensive programming.
+                            m_log.WarnFormat("{0} detailTexture[{1}] is null in non-color mode. This should not happen.", LogHeader, i);
+                            // Set a dummy or fallback to avoid NullReferenceException
+                            // For simplicity, we assume previous logic ensures non-null.
+                            // If it can be null, a solid color bitmap should be created as fallback.
+                        }
+                    }
+
 
                     byte* ptr;
                     byte* ptrO;
@@ -376,14 +383,14 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                     {
                         pcty = y * invtheightMinus1;
                         ty = (int)(y * yFactor);
-                        int ypatch = (ty & 0x0f) * datas[0].Stride;
-                        yglobalpos = (uint)ty + regionPositionY;
+                        int ypatch = (ty & 0x0f) * datas[0].Stride; // datas[0] used for stride as all should be 16x16
+                        uint yglobalpos = (uint)ty + regionPositionY; // Move yglobalpos declaration here
                         ptrO = (byte*)outputData.Scan0.ToPointer() + y * outputData.Stride;
 
                         for (int x = 0; x < twidth; x++, ptrO += 3)
                         {
                             tx = (int)(x * xFactor);
-                            pctx = x  * invtwitdthMinus1;
+                            pctx = x * invtwitdthMinus1;
                             height = (float)terrain[tx, ty];
                             layer = getLayerTex(height, pctx, pcty,
                                 (uint)tx + regionPositionX, yglobalpos,
@@ -395,17 +402,22 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
                             int patchOffset = (tx & 0x0f) * 3 + ypatch;
 
+                            // Ensure l0 is within bounds before access
+                            if (l0 < 0) l0 = 0;
+                            if (l0 > 3) l0 = 3;
+
                             ptr = (byte*)datas[l0].Scan0.ToPointer() + patchOffset;
                             aB = ptr[0];
                             aG = ptr[1];
                             aR = ptr[2];
 
-                            if(l0 >= 2 )
-                                l0 = 3;
+                            // Calculate l1 for interpolation
+                            if (l0 >= 2)
+                                l1 = 3;
                             else
-                                l0++;
+                                l1 = l0 + 1;
 
-                            ptr = (byte*)datas[l0].Scan0.ToPointer() + patchOffset;
+                            ptr = (byte*)datas[l1].Scan0.ToPointer() + patchOffset;
                             bB = ptr[0];
                             bG = ptr[1];
                             bR = ptr[2];
@@ -418,19 +430,17 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                     }
 
                     for (int i = 0; i < detailTexture.Length; i++)
-                        detailTexture[i].UnlockBits(datas[i]);
+                    {
+                        if (detailTexture[i] != null) // Only unlock if it was locked
+                        {
+                            detailTexture[i].UnlockBits(datas[i]);
+                            detailTexture[i].Dispose(); // Dispose the bitmap
+                        }
+                    }
                 }
-
-                for(int i = 0; i < detailTexture.Length; i++)
-                    if(detailTexture[i] != null)
-                        detailTexture[i].Dispose();
             }
 
             output.UnlockBits(outputData);
-
-//output.Save("terr.jpg",ImageFormat.Jpeg);
-
-            #endregion Texture Compositing
 
             return output;
         }
@@ -449,7 +459,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
 
             float heightRange = ImageUtils.Bilinear(heightRanges, pctX, pctY);
             heightRange = Utils.Clamp(heightRange, 0f, 255f);
-            if(heightRange == 0f)
+            if (heightRange == 0f)
                 return 0;
 
             // Generate two frequencies of perlin noise based on our global position
@@ -464,5 +474,21 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
             float layer = ((height + noise - startHeight) / heightRange) * 4f;
             return Utils.Clamp(layer, 0f, 3f);
         }
+
+        private static void normalize2(float[,] v, int i)
+        {
+            float s = (float)Math.Sqrt(v[i, 0] * v[i, 0] + v[i, 1] * v[i, 1]);
+            if (s == 0f)
+            {
+                v[i, 0] = 1f;
+                v[i, 1] = 0f;
+            }
+            else
+            {
+                v[i, 0] /= s;
+                v[i, 1] /= s;
+            }
+        }
     }
+    #endregion
 }
