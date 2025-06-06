@@ -53,6 +53,11 @@ namespace OpenSim.Data.MongoDB
         protected static IMongoDatabase m_mongoDatabase;
         private readonly IMongoCollection<T> _collection;
 
+        public IMongoCollection<T> Collection
+        {
+            get { return _collection; }
+        }
+
         private static bool m_initialized;
 
         protected virtual Assembly Assembly

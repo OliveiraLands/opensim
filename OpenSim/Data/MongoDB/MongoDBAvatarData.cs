@@ -33,11 +33,6 @@ using System.Threading;
 using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpMongoDB
-    using Community.CsharpMongoDB.MongoDB;
-#else
-    using Mono.Data.MongoDB;
-#endif
 
 namespace OpenSim.Data.MongoDB
 {
@@ -50,12 +45,15 @@ namespace OpenSim.Data.MongoDB
 //        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         public MongoDBAvatarData(string connectionString, string realm) :
-                base(connectionString, realm, "Avatar")
+                base(connectionString, realm, "Avatar", "PrincipalID")
         {
         }
 
+        
         public bool Delete(UUID principalID, string name)
         {
+            return base.Delete("PrincipalID", principalID.ToString());
+            /*
             using (MongoDBCommand cmd = new MongoDBCommand())
             {
                 cmd.CommandText = String.Format("delete from {0} where `PrincipalID` = :PrincipalID and `Name` = :Name", m_Realm);
@@ -65,8 +63,9 @@ namespace OpenSim.Data.MongoDB
                 if (ExecuteNonQuery(cmd, m_Connection) > 0)
                     return true;
             }
-
             return false;
+            */
         }
+
     }
 }

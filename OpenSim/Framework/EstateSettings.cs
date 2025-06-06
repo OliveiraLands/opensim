@@ -281,6 +281,13 @@ namespace OpenSim.Framework
         public bool DoDenyMinors = true;
         public bool DoDenyAnonymous = true;
 
+        private List<UUID> m_RegionIDs = new();
+        public List<UUID> RegionIDs
+        {
+            get { return m_RegionIDs; }
+            set { m_RegionIDs = new List<UUID>(value); }
+        }
+
         public EstateSettings()
         {
         }

@@ -28,13 +28,10 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Reflection;
 using log4net;
-#if CSharpMongoDB
-    using Community.CsharpMongoDB.MongoDB;
-#else
-    using Mono.Data.MongoDB;
-#endif
+using MongoDB.Driver;
 using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
@@ -46,12 +43,9 @@ namespace OpenSim.Data.MongoDB
         private static readonly ILog m_log =
             LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-        private MongoDBConnection m_connection;
+        protected MongoDBGenericTableHandler<EstateSettings> m_mongodata;
         private string m_connectionString;
 
-        private FieldInfo[] m_Fields;
-        private Dictionary<string, FieldInfo> m_FieldMap =
-                new Dictionary<string, FieldInfo>();
 
         protected virtual Assembly Assembly
         {
@@ -69,49 +63,20 @@ namespace OpenSim.Data.MongoDB
 
         public void Initialise(string connectionString)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
-
             m_connectionString = connectionString;
 
             m_log.Info("[ESTATE DB]: MongoDB - connecting: "+m_connectionString);
 
-            m_connection = new MongoDBConnection(m_connectionString);
-            m_connection.Open();
+            m_mongodata = new MongoDBGenericTableHandler<EstateSettings>(m_connectionString, "EstateStore", "EstateStore","EstateID");
 
-            Migration m = new Migration(m_connection, Assembly, "EstateStore");
-            m.Update();
-
-            //m_connection.Close();
-           // m_connection.Open();
-
-            Type t = typeof(EstateSettings);
-            m_Fields = t.GetFields(BindingFlags.NonPublic |
-                                   BindingFlags.Instance |
-                                   BindingFlags.DeclaredOnly);
-
-            foreach (FieldInfo f in m_Fields)
-                if (f.Name.Substring(0, 2) == "m_")
-                    m_FieldMap[f.Name.Substring(2)] = f;
-        }
-
-        private string[] FieldList
-        {
-            get { return new List<string>(m_FieldMap.Keys).ToArray(); }
         }
 
         public EstateSettings LoadEstateSettings(UUID regionID, bool create)
         {
-            string sql = "select estate_settings."+String.Join(",estate_settings.", FieldList)+" from estate_map left join estate_settings on estate_map.EstateID = estate_settings.EstateID where estate_settings.EstateID is not null and RegionID = :RegionID";
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = sql;
-                cmd.Parameters.AddWithValue(":RegionID", regionID.ToString());
-
-                return DoLoad(cmd, regionID, create);
-            }
+            return m_mongodata.Get(regionID.ToString(), "EstateID").First();
         }
 
+        /*
         private EstateSettings DoLoad(MongoDBCommand cmd, UUID regionID, bool create)
         {
             EstateSettings es = new EstateSettings();
@@ -165,6 +130,7 @@ namespace OpenSim.Data.MongoDB
             es.EstateGroups = LoadUUIDList(es.EstateID, "estate_groups");
             return es;
         }
+        */
 
         public EstateSettings CreateNewEstate(int estateID)
         {
@@ -173,216 +139,34 @@ namespace OpenSim.Data.MongoDB
             es.OnSave += StoreEstateSettings;
             es.EstateID = Convert.ToUInt32(estateID);
 
-            DoCreate(es);
+            var maxEstate = m_mongodata.Collection
+                .Find(Builders<EstateSettings>.Filter.Empty)
+                .SortByDescending(e => e.EstateID)
+                .Limit(1)
+                .FirstOrDefault();
 
-            LoadBanList(es);
+            uint maxId = maxEstate?.EstateID ?? 0;
 
-            es.EstateManagers = LoadUUIDList(es.EstateID, "estate_managers");
-            es.EstateAccess = LoadUUIDList(es.EstateID, "estate_users");
-            es.EstateGroups = LoadUUIDList(es.EstateID, "estate_groups");
+            if (maxId < 100)
+                maxId = 100;
+
+            es.EstateID = ++maxId;
+            es.Save();
 
             return es;
         }
 
-        private void DoCreate(EstateSettings es)
-        {
-            List<string> names = new List<string>(FieldList);
-
-            using (MongoDBCommand cmd = m_connection.CreateCommand())
-            {
-                if (es.EstateID < 100)
-                {
-                    cmd.CommandText = "select MAX(EstateID) FROM estate_settings";
-                    cmd.Parameters.Clear();
-                    uint a = 0;
-                    object r = cmd.ExecuteScalar();
-                    if(r!=null && !(r is DBNull))
-                    {
-                        a = Convert.ToUInt32(r);
-                    }
-                    if (a < 100)
-                        a = 100;
-                    ++a;
-                    es.EstateID = a;
-                }
-
-                cmd.CommandText = "insert into estate_settings ("+String.Join(",", names.ToArray())+") values ( :"+String.Join(", :", names.ToArray())+")";
-                cmd.Parameters.Clear();
-
-                foreach (string name in FieldList)
-                {
-                    if (m_FieldMap[name].GetValue(es) is bool)
-                    {
-                        if ((bool)m_FieldMap[name].GetValue(es))
-                            cmd.Parameters.AddWithValue(":"+name, "1");
-                        else
-                            cmd.Parameters.AddWithValue(":"+name, "0");
-                    }
-                    else
-                    {
-                        cmd.Parameters.AddWithValue(":"+name, m_FieldMap[name].GetValue(es).ToString());
-                    }
-                }
-
-                cmd.ExecuteNonQuery();
-            }
-        }
 
         public void StoreEstateSettings(EstateSettings es)
         {
-            List<string> fields = new List<string>(FieldList);
-            fields.Remove("EstateID");
-
-            List<string> terms = new List<string>();
-
-            foreach (string f in fields)
-                terms.Add(f+" = :"+f);
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = "update estate_settings set " + String.Join(", ", terms.ToArray()) + " where EstateID = :EstateID";
-                cmd.Parameters.AddWithValue(":EstateID", es.EstateID);
-
-                foreach (string name in FieldList)
-                {
-                    if (m_FieldMap[name].GetValue(es) is bool)
-                    {
-                        if ((bool)m_FieldMap[name].GetValue(es))
-                            cmd.Parameters.AddWithValue(":"+name, "1");
-                        else
-                            cmd.Parameters.AddWithValue(":"+name, "0");
-                    }
-                    else
-                    {
-                        cmd.Parameters.AddWithValue(":"+name, m_FieldMap[name].GetValue(es).ToString());
-                    }
-                }
-
-                cmd.ExecuteNonQuery();
-            }
-
-            SaveBanList(es);
-            SaveUUIDList(es.EstateID, "estate_managers", es.EstateManagers);
-            SaveUUIDList(es.EstateID, "estate_users", es.EstateAccess);
-            SaveUUIDList(es.EstateID, "estate_groups", es.EstateGroups);
+            es.Save();
         }
 
-        private void LoadBanList(EstateSettings es)
-        {
-            es.ClearBans();
-
-            IDataReader r;
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = "select * from estateban where EstateID = :EstateID";
-                cmd.Parameters.AddWithValue(":EstateID", es.EstateID);
-
-                r = cmd.ExecuteReader();
-            }
-
-            while (r.Read())
-            {
-                EstateBan eb = new EstateBan();
-
-                eb.BannedUserID = DBGuid.FromDB(r["bannedUUID"]);
-                eb.BannedHostAddress = "0.0.0.0";
-                eb.BannedHostIPMask = "0.0.0.0";
-                eb.BanningUserID = DBGuid.FromDB(r["banningUUID"]);
-                eb.BanTime = Convert.ToInt32(r["banTime"]);
-                es.AddBan(eb);
-            }
-            r.Close();
-        }
-
-        private void SaveBanList(EstateSettings es)
-        {
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = "delete from estateban where EstateID = :EstateID";
-                cmd.Parameters.AddWithValue(":EstateID", es.EstateID.ToString());
-
-                cmd.ExecuteNonQuery();
-
-                cmd.Parameters.Clear();
-
-                cmd.CommandText = "insert into estateban (EstateID, bannedUUID, bannedIp, bannedIpHostMask, bannedNameMask, banningUUID, banTime) values ( :EstateID, :bannedUUID, '', '', '', :banningUUID, :banTime )";
-
-                foreach (EstateBan b in es.EstateBans)
-                {
-                    cmd.Parameters.AddWithValue(":EstateID", es.EstateID.ToString());
-                    cmd.Parameters.AddWithValue(":bannedUUID", b.BannedUserID.ToString());
-                    cmd.Parameters.AddWithValue(":banningUUID", b.BanningUserID.ToString());
-                    cmd.Parameters.AddWithValue(":banTime", b.BanTime);
-
-                    cmd.ExecuteNonQuery();
-                    cmd.Parameters.Clear();
-                }
-            }
-        }
-
-        void SaveUUIDList(uint EstateID, string table, UUID[] data)
-        {
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = "delete from "+table+" where EstateID = :EstateID";
-                cmd.Parameters.AddWithValue(":EstateID", EstateID.ToString());
-
-                cmd.ExecuteNonQuery();
-
-                cmd.Parameters.Clear();
-
-                cmd.CommandText = "insert into "+table+" (EstateID, uuid) values ( :EstateID, :uuid )";
-
-                foreach (UUID uuid in data)
-                {
-                    cmd.Parameters.AddWithValue(":EstateID", EstateID.ToString());
-                    cmd.Parameters.AddWithValue(":uuid", uuid.ToString());
-
-                    cmd.ExecuteNonQuery();
-                    cmd.Parameters.Clear();
-                }
-            }
-        }
-
-        UUID[] LoadUUIDList(uint EstateID, string table)
-        {
-            List<UUID> uuids = new List<UUID>();
-            IDataReader r;
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = "select uuid from "+table+" where EstateID = :EstateID";
-                cmd.Parameters.AddWithValue(":EstateID", EstateID);
-
-                r = cmd.ExecuteReader();
-            }
-
-            while (r.Read())
-            {
-                // EstateBan eb = new EstateBan();
-
-                UUID uuid = new UUID();
-                UUID.TryParse(r["uuid"].ToString(), out uuid);
-
-                uuids.Add(uuid);
-            }
-            r.Close();
-
-            return uuids.ToArray();
-        }
 
         public EstateSettings LoadEstateSettings(int estateID)
         {
-            string sql = "select estate_settings."+String.Join(",estate_settings.", FieldList)+" from estate_settings where estate_settings.EstateID = :EstateID";
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = sql;
-                cmd.Parameters.AddWithValue(":EstateID", estateID.ToString());
-
-                return DoLoad(cmd, UUID.Zero, false);
-            }
+            return m_mongodata.Get("estateID", estateID.ToString()).FirstOrDefault() ??
+                   CreateNewEstate(estateID);
         }
 
         public List<EstateSettings> LoadEstateSettingsAll()
@@ -400,111 +184,85 @@ namespace OpenSim.Data.MongoDB
         {
             List<int> result = new List<int>();
 
-            string sql = "select EstateID from estate_settings where estate_settings.EstateName = :EstateName";
-            IDataReader r;
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
+            if (string.IsNullOrEmpty(search))
             {
-                cmd.CommandText = sql;
-                cmd.Parameters.AddWithValue(":EstateName", search);
-
-                r = cmd.ExecuteReader();
+                return GetEstatesAll();
             }
-
-            while (r.Read())
+            search = search.Trim().ToLowerInvariant();
+            if (search.Length == 0)
             {
-                result.Add(Convert.ToInt32(r["EstateID"]));
+                return GetEstatesAll();
             }
-            r.Close();
+            if (search.Length > 64)
+            {
+                search = search.Substring(0, 64);
+            }
+            // Search for estates by name
+            // Note: This is a simple search, it does not support wildcards or partial matches.
+            // If you need more complex searching, consider using a full-text search index or similar.
+            // This query assumes that the estate_settings table has a column named EstateName.
+
+            result  = m_mongodata.Collection
+                .Find(e => e.EstateName.ToLowerInvariant().Contains(search))
+                .Project(e => (int)e.EstateID)
+                .ToList();
 
             return result;
         }
 
         public List<int> GetEstatesAll()
         {
-            List<int> result = new List<int>();
-
-            string sql = "select EstateID from estate_settings";
-            IDataReader r;
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = sql;
-
-                r = cmd.ExecuteReader();
-            }
-
-            while (r.Read())
-            {
-                result.Add(Convert.ToInt32(r["EstateID"]));
-            }
-            r.Close();
+            List<int> result = m_mongodata.Collection
+                .Find(FilterDefinition<EstateSettings>.Empty)
+                .Project(e => (int)e.EstateID)
+                .ToList();
 
             return result;
         }
 
         public List<int> GetEstatesByOwner(UUID ownerID)
         {
-            List<int> result = new List<int>();
-
-            string sql = "select EstateID from estate_settings where estate_settings.EstateOwner = :EstateOwner";
-            IDataReader r;
-
-            using (MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-            {
-                cmd.CommandText = sql;
-                cmd.Parameters.AddWithValue(":EstateOwner", ownerID);
-
-                r = cmd.ExecuteReader();
-            }
-
-            while (r.Read())
-            {
-                result.Add(Convert.ToInt32(r["EstateID"]));
-            }
-            r.Close();
+            List<int> result = m_mongodata.Collection
+                .Find(e => e.EstateOwner == ownerID)             // Filtra pelo campo EstateOwner
+                .Project(e => (int)e.EstateID)                   // Projeta apenas EstateID convertido para int
+                .ToList();
 
             return result;
         }
 
         public bool LinkRegion(UUID regionID, int estateID)
         {
-            using(MongoDBTransaction transaction = m_connection.BeginTransaction())
+            EstateSettings estate = LoadEstateSettings(estateID);
+            if (estate == null)
             {
-                // Delete any existing estate mapping for this region.
-                using(MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-                {
-                    cmd.CommandText = "delete from estate_map where RegionID = :RegionID";
-                    cmd.Transaction = transaction;
-                    cmd.Parameters.AddWithValue(":RegionID", regionID.ToString());
-
-                    cmd.ExecuteNonQuery();
-                }
-
-                using(MongoDBCommand cmd = (MongoDBCommand)m_connection.CreateCommand())
-                {
-                    cmd.CommandText = "insert into estate_map values (:RegionID, :EstateID)";
-                    cmd.Transaction = transaction;
-                    cmd.Parameters.AddWithValue(":RegionID", regionID.ToString());
-                    cmd.Parameters.AddWithValue(":EstateID", estateID.ToString());
-
-                    if (cmd.ExecuteNonQuery() == 0)
-                    {
-                        transaction.Rollback();
-                        return false;
-                    }
-                    else
-                    {
-                        transaction.Commit();
-                        return true;
-                    }
-                }
+                m_log.ErrorFormat("[MongoDBEstateStore]: Unable to link region {0} to estate {1} because the estate does not exist.", regionID, estateID);
+                return false;
             }
+            // Assuming that the regionID is stored in the EstateSettings object
+            // You may need to adjust this based on your actual data structure
+            if (estate.RegionIDs == null)
+            {
+                estate.RegionIDs = new List<UUID>();
+            }
+            if (estate.RegionIDs.Contains(regionID))
+            {
+                m_log.WarnFormat("[MongoDBEstateStore]: Region {0} is already linked to estate {1}.", regionID, estateID);
+                return false;
+            }
+            estate.RegionIDs.Add(regionID);
+            StoreEstateSettings(estate);
+            return true;
         }
 
         public List<UUID> GetRegions(int estateID)
         {
-            return new List<UUID>();
+            EstateSettings estate = LoadEstateSettings(estateID);
+            if (estate == null)
+            {
+                m_log.ErrorFormat("[MongoDBEstateStore]: Unable to get estate {0} because the estate does not exist.", estateID);
+                return new List<UUID>();
+            }
+            return estate.RegionIDs ?? new List<UUID>();
         }
 
         public bool DeleteEstate(int estateID)
