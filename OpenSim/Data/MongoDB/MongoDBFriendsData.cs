@@ -31,18 +31,13 @@ using System.Collections.Generic;
 using System.Data;
 using OpenMetaverse;
 using OpenSim.Framework;
-#if CSharpMongoDB
-    using Community.CsharpMongoDB.MongoDB;
-#else
-    using Mono.Data.MongoDB;
-#endif
 
 namespace OpenSim.Data.MongoDB
 {
     public class MongoDBFriendsData : MongoDBGenericTableHandler<FriendsData>, IFriendsData
     {
         public MongoDBFriendsData(string connectionString, string realm)
-            : base(connectionString, realm, "FriendsStore")
+            : base(connectionString, realm, "FriendsStore", "PrincipalID")
         {
         }
 
@@ -53,9 +48,19 @@ namespace OpenSim.Data.MongoDB
 
         public FriendsData[] GetFriends(string userID)
         {
+            return m_mongoDatabase.Get(userID);
+
             using (MongoDBCommand cmd = new MongoDBCommand())
             {
-                cmd.CommandText = String.Format("select a.*,case when b.Flags is null then -1 else b.Flags end as TheirFlags from {0} as a left join {0} as b on a.PrincipalID = b.Friend and a.Friend = b.PrincipalID where a.PrincipalID = :PrincipalID", m_Realm);
+                cmd.CommandText = String.Format("" +
+                    "select a.*,case when b.Flags is null then -1 else b.Flags end as TheirFlags " +
+                    "from {0} as a " +
+                    "left join {0} as b " +
+                    "on a.PrincipalID = b.Friend " +
+                    "and a.Friend = b.PrincipalID " +
+                    "where a.PrincipalID = :PrincipalID", 
+                    m_Realm);
+
                 cmd.Parameters.AddWithValue(":PrincipalID", userID.ToString());
 
                 return DoQuery(cmd);
