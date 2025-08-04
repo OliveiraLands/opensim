@@ -1135,7 +1135,7 @@ namespace OpenSim.Region.Framework.Scenes
             IConfig restartConfig = config.Configs["RestartModule"];
             if (restartConfig is not null)
             {
-                string markerPath = restartConfig.GetString("MarkerPath", String.Empty);
+                string markerPath = restartConfig.GetString("MarkerPath", string.Empty);
                 if (!string.IsNullOrEmpty(markerPath))
                 {
                     string path = Path.Combine(markerPath, RegionInfo.RegionID.ToString() + ".started");
@@ -1814,7 +1814,7 @@ namespace OpenSim.Region.Framework.Scenes
                             IConfig restartConfig = m_config.Configs["RestartModule"];
                             if (restartConfig is not null)
                             {
-                                string markerPath = restartConfig.GetString("MarkerPath", String.Empty);
+                                string markerPath = restartConfig.GetString("MarkerPath", string.Empty);
 
                                 if (!string.IsNullOrEmpty(markerPath))
                                 {
@@ -3631,7 +3631,8 @@ namespace OpenSim.Region.Framework.Scenes
 
             if (target is not null && target2 is not null)
             {
-                Vector3 direction = Vector3.Normalize(RayEnd - RayStart);
+                Vector3 direction = RayEnd - RayStart;
+                direction.Normalize();
 
                 //pos = target2.AbsolutePosition;
                 //m_log.Info("[OBJECT_REZ]: TargetPos: " + pos.ToString() + ", RayStart: " + RayStart.ToString() + ", RayEnd: " + RayEnd.ToString() + ", Volume: " + Util.GetDistanceTo(RayStart,RayEnd).ToString() + ", mag1: " + Util.GetMagnitude(RayStart).ToString() + ", mag2: " + Util.GetMagnitude(RayEnd).ToString());
@@ -3639,7 +3640,7 @@ namespace OpenSim.Region.Framework.Scenes
                 // TODO: Raytrace better here
 
                 //EntityIntersection ei = m_sceneGraph.GetClosestIntersectingPrim(new Ray(AXOrigin, AXdirection));
-                Ray NewRay = new(RayStart,direction);
+                Ray NewRay = new(RayStart, direction);
 
                 // Ray Trace against target here
                 EntityIntersection ei = target2.TestIntersectionOBB(NewRay, Quaternion.Identity, frontFacesOnly, CopyCenters);
@@ -4384,7 +4385,6 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     m_log.WarnFormat("[CONNECTION BEGIN]: Denied access to: {0} ({1} {2}) at {3} because: {4}",
                                      agent.AgentID, agent.firstname, agent.lastname, RegionInfo.RegionName, reason);
-
                     return false;
                 }
             }
@@ -4798,7 +4798,7 @@ Label_GroupsDone:
             {
                 sp = GetScenePresence(agentID);
 
-                if (sp is null)
+                if (sp is null || sp.IsDeleted)
                 {
                     // If there is no scene presence, we may be handling a dead
                     // client. These can keep an avatar from reentering a region
@@ -4815,7 +4815,7 @@ Label_GroupsDone:
 
                     // need to try this again, bc client close may had not done it
                     m_authenticateHandler?.RemoveCircuit(agentID);
-                    m_clientManager.Remove(agentID);
+                    m_clientManager?.Remove(agentID);
                     m_capsModule?.RemoveCaps(agentID, 0);
 
                     return ret;

@@ -148,7 +148,7 @@ namespace OpenSim.Region.Framework.Scenes
         public bool IsRoot
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return Object.ReferenceEquals(ParentGroup.RootPart, this); }
+            get { return object.ReferenceEquals(ParentGroup.RootPart, this); }
         }
 
         /// <summary>
@@ -733,7 +733,7 @@ namespace OpenSim.Region.Framework.Scenes
             set { m_scriptAccessPin = (int)value; }
         }
 
-        public Byte[] TextureAnimation
+        public byte[] TextureAnimation
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get { return m_TextureAnimation; }
@@ -815,6 +815,7 @@ namespace OpenSim.Region.Framework.Scenes
             set
             {
                 m_groupPosition = value;
+
                 PhysicsActor actor = PhysActor;
                 if (actor != null && ParentGroup.Scene.PhysicsScene != null)
                 {
@@ -917,11 +918,10 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 // If this is a root of a linkset, the real rotation is what the physics engine thinks.
                 // If not a root prim, the offset rotation is computed by SOG and is relative to the root.
-                if (_parentID == 0 && (Shape.PCode != 9 || Shape.State == 0))
+                PhysicsActor actor = PhysActor;
+                if (actor != null && _parentID == 0 && (Shape.PCode != 9 || Shape.State == 0))
                 { 
-                    PhysicsActor actor = PhysActor;
-                    if(PhysActor != null)
-                        m_rotationOffset = actor.Orientation;
+                    m_rotationOffset = actor.Orientation;
                 }
                 return m_rotationOffset;
             }
@@ -2535,7 +2535,6 @@ namespace OpenSim.Region.Framework.Scenes
             PhysicsActor pa = PhysActor;
             return pa is null ? AbsolutePosition : pa.CenterOfMass;
         }
-
 
         public Vector3 GetForce()
         {
@@ -4490,6 +4489,7 @@ namespace OpenSim.Region.Framework.Scenes
                 ParentGroup.Scene.EventManager.TriggerOnScriptChangedEvent(LocalId, (uint)val, data);
         }
 
+
         public void TrimPermissions()
         {
             BaseMask &= (uint)(PermissionMask.All | PermissionMask.Export);
@@ -5707,7 +5707,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
-        public Byte[] SerializeAnimations()
+        public byte[] SerializeAnimations()
         {
             if (AnimationsNames == null)
                 return null;
@@ -5741,7 +5741,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
-        public void DeSerializeAnimations(Byte[] data)
+        public void DeSerializeAnimations(byte[] data)
         {
             if(data == null)
             {
