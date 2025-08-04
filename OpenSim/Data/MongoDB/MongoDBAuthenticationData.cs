@@ -43,6 +43,7 @@ namespace OpenSim.Data.MongoDB
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         protected MongoDBGenericTableHandler<AuthenticationData> m_authdata;
+        private IMongoCollection<AuthToken> m_tokensCollection;
 
         private string m_Realm;
         private List<string> m_ColumnNames;
@@ -61,7 +62,7 @@ namespace OpenSim.Data.MongoDB
             m_Realm = realm;
 
             m_authdata = new MongoDBGenericTableHandler<AuthenticationData>(connectionString, realm, realm, "PrincipalID");
-
+            m_tokensCollection = m_mongoDatabase.GetCollection<AuthToken>("tokens");
         }
 
         public AuthenticationData Get(UUID principalID)
@@ -78,52 +79,93 @@ namespace OpenSim.Data.MongoDB
 
         public bool SetDataItem(UUID principalID, string item, string value)
         {
-            using (MongoDBCommand cmd = new MongoDBCommand("update `" + m_Realm +
-                    "` set `" + item + "` = " + value + " where UUID = '" + principalID.ToString() + "'"))
+            try
             {
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
-            }
+                var filter = Builders<AuthenticationData>.Filter.Eq(a => a.PrincipalID, principalID);
+                var update = Builders<AuthenticationData>.Update.Set(item, value);
+                var updateResult = m_authdata.Collection.UpdateOne(filter, update);
 
-            return false;
+                return updateResult.IsAcknowledged && updateResult.ModifiedCount > 0;
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[AUTHENTICATION DB]: Error setting data item: {0}", e.Message);
+                return false;
+            }
         }
 
         public bool SetToken(UUID principalID, string token, int lifetime)
         {
-            if (System.Environment.TickCount - m_LastExpire > 30000)
-                DoExpire();
-
-            using (MongoDBCommand cmd = new MongoDBCommand("insert into tokens (UUID, token, validity) values ('" + principalID.ToString() +
-                "', '" + token + "', datetime('now', 'localtime', '+" + lifetime.ToString() + " minutes'))"))
+            try
             {
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
-            }
+                if (System.Environment.TickCount - m_LastExpire > 30000)
+                    DoExpire();
 
-            return false;
+                var filter = Builders<AuthToken>.Filter.Eq(t => t.PrincipalID, principalID);
+                var update = Builders<AuthToken>.Update
+                    .Set(t => t.Token, token)
+                    .Set(t => t.Validity, DateTime.UtcNow.AddMinutes(lifetime));
+                var options = new UpdateOptions { IsUpsert = true };
+
+                var updateResult = m_tokensCollection.UpdateOne(filter, update, options);
+
+                return updateResult.IsAcknowledged && (updateResult.ModifiedCount > 0 || updateResult.UpsertedId != null);
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[AUTHENTICATION DB]: Error setting token: {0}", e.Message);
+                return false;
+            }
+        }
+
+        // Simple class to represent authentication tokens in MongoDB
+        private class AuthToken
+        {
+            public UUID PrincipalID { get; set; }
+            public string Token { get; set; }
+            public DateTime Validity { get; set; }
         }
 
         public bool CheckToken(UUID principalID, string token, int lifetime)
         {
-            if (System.Environment.TickCount - m_LastExpire > 30000)
-                DoExpire();
-
-            using (MongoDBCommand cmd = new MongoDBCommand("update tokens set validity = datetime('now', 'localtime', '+" + lifetime.ToString() +
-                " minutes') where UUID = '" + principalID.ToString() + "' and token = '" + token + "' and validity > datetime('now', 'localtime')"))
+            try
             {
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
-            }
+                if (System.Environment.TickCount - m_LastExpire > 30000)
+                    DoExpire();
 
-            return false;
+                var filter = Builders<AuthToken>.Filter.And(
+                    Builders<AuthToken>.Filter.Eq(t => t.PrincipalID, principalID),
+                    Builders<AuthToken>.Filter.Eq(t => t.Token, token),
+                    Builders<AuthToken>.Filter.Gt(t => t.Validity, DateTime.UtcNow) // Check if token is still valid
+                );
+
+                var update = Builders<AuthToken>.Update.Set(t => t.Validity, DateTime.UtcNow.AddMinutes(lifetime));
+                var updateResult = m_tokensCollection.UpdateOne(filter, update);
+
+                return updateResult.IsAcknowledged && updateResult.ModifiedCount > 0;
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[AUTHENTICATION DB]: Error checking token: {0}", e.Message);
+                return false;
+            }
         }
 
         private void DoExpire()
         {
-            using (MongoDBCommand cmd = new MongoDBCommand("delete from tokens where validity < datetime('now', 'localtime')"))
-                ExecuteNonQuery(cmd, m_Connection);
-
-            m_LastExpire = System.Environment.TickCount;
+            try
+            {
+                var filter = Builders<AuthToken>.Filter.Lt(t => t.Validity, DateTime.UtcNow);
+                m_tokensCollection.DeleteMany(filter);
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[AUTHENTICATION DB]: Error expiring tokens: {0}", e.Message);
+            }
+            finally
+            {
+                m_LastExpire = System.Environment.TickCount;
+            }
         }
     }
 }

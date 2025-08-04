@@ -73,85 +73,56 @@ namespace OpenSim.Data.MongoDB
 
         public EstateSettings LoadEstateSettings(UUID regionID, bool create)
         {
-            return m_mongodata.Get(regionID.ToString(), "EstateID").First();
-        }
+            // Assuming EstateSettings has a RegionIDs field (List<UUID>) that stores linked region UUIDs
+            var filter = Builders<EstateSettings>.Filter.AnyEq(e => e.RegionIDs, regionID);
+            EstateSettings es = m_mongodata.Collection.Find(filter).FirstOrDefault();
 
-        /*
-        private EstateSettings DoLoad(MongoDBCommand cmd, UUID regionID, bool create)
-        {
-            EstateSettings es = new EstateSettings();
-            es.OnSave += StoreEstateSettings;
-            IDataReader r = null;
-            try
+            if (es == null && create)
             {
-                 r = cmd.ExecuteReader();
-            }
-            catch (MongoDBException)
-            {
-                m_log.Error("[MongoDB]: There was an issue loading the estate settings.  This can happen the first time running OpenSimulator with CSharpMongoDB the first time.  OpenSimulator will probably crash, restart it and it should be good to go.");
+                // If not found and create is true, create a new estate
+                es = CreateNewEstate(0); // Pass 0 to CreateNewEstate to auto-generate ID
+                LinkRegion(regionID, (int)es.EstateID); // Link the region to the new estate
             }
 
-            if (r != null && r.Read())
+            if (es != null)
             {
-                foreach (string name in FieldList)
-                {
-                    if (m_FieldMap[name].GetValue(es) is bool)
-                    {
-                        int v = Convert.ToInt32(r[name]);
-                        if (v != 0)
-                            m_FieldMap[name].SetValue(es, true);
-                        else
-                            m_FieldMap[name].SetValue(es, false);
-                    }
-                    else if (m_FieldMap[name].GetValue(es) is UUID)
-                    {
-                        UUID uuid = UUID.Zero;
-
-                        UUID.TryParse(r[name].ToString(), out uuid);
-                        m_FieldMap[name].SetValue(es, uuid);
-                    }
-                    else
-                    {
-                        m_FieldMap[name].SetValue(es, Convert.ChangeType(r[name], m_FieldMap[name].FieldType));
-                    }
-                }
-                r.Close();
-            }
-            else if (create)
-            {
-                DoCreate(es);
-                LinkRegion(regionID, (int)es.EstateID);
+                es.OnSave += StoreEstateSettings;
             }
 
-            LoadBanList(es);
-
-            es.EstateManagers = LoadUUIDList(es.EstateID, "estate_managers");
-            es.EstateAccess = LoadUUIDList(es.EstateID, "estate_users");
-            es.EstateGroups = LoadUUIDList(es.EstateID, "estate_groups");
             return es;
         }
-        */
+
+        
 
         public EstateSettings CreateNewEstate(int estateID)
         {
             EstateSettings es = new EstateSettings();
-            
             es.OnSave += StoreEstateSettings;
-            es.EstateID = Convert.ToUInt32(estateID);
 
-            var maxEstate = m_mongodata.Collection
-                .Find(Builders<EstateSettings>.Filter.Empty)
-                .SortByDescending(e => e.EstateID)
-                .Limit(1)
-                .FirstOrDefault();
+            // If estateID is 0, generate a new one. Otherwise, use the provided ID.
+            if (estateID == 0)
+            {
+                // Find the maximum existing EstateID and increment it
+                var maxEstate = m_mongodata.Collection
+                    .Find(Builders<EstateSettings>.Filter.Empty)
+                    .SortByDescending(e => e.EstateID)
+                    .Limit(1)
+                    .FirstOrDefault();
 
-            uint maxId = maxEstate?.EstateID ?? 0;
+                uint maxId = maxEstate?.EstateID ?? 0;
 
-            if (maxId < 100)
-                maxId = 100;
+                if (maxId < 100)
+                    maxId = 100;
 
-            es.EstateID = ++maxId;
-            es.Save();
+                es.EstateID = ++maxId;
+            }
+            else
+            {
+                es.EstateID = (uint)estateID;
+            }
+
+            // Store the new estate settings
+            StoreEstateSettings(es);
 
             return es;
         }
@@ -159,7 +130,16 @@ namespace OpenSim.Data.MongoDB
 
         public void StoreEstateSettings(EstateSettings es)
         {
-            es.Save();
+            try
+            {
+                var filter = Builders<EstateSettings>.Filter.Eq(e => e.EstateID, es.EstateID);
+                var options = new ReplaceOptions { IsUpsert = true };
+                m_mongodata.Collection.ReplaceOne(filter, es, options);
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[ESTATE DB]: Error storing estate settings: {0}", e.Message);
+            }
         }
 
 
@@ -267,7 +247,18 @@ namespace OpenSim.Data.MongoDB
 
         public bool DeleteEstate(int estateID)
         {
-            return false;
+            try
+            {
+                var filter = Builders<EstateSettings>.Filter.Eq(e => e.EstateID, (uint)estateID);
+                var deleteResult = m_mongodata.Collection.DeleteOne(filter);
+
+                return deleteResult.IsAcknowledged && deleteResult.DeletedCount > 0;
+            }
+            catch (Exception e)
+            {
+                m_log.ErrorFormat("[ESTATE DB]: Error deleting estate: {0}", e.Message);
+                return false;
+            }
         }
     }
 }

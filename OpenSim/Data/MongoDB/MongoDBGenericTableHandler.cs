@@ -107,7 +107,7 @@ namespace OpenSim.Data.MongoDB
                     var propInfo = typeof(T).GetProperty(nomeCampoId, BindingFlags.Public | BindingFlags.Instance);
 
                     if (propInfo == null)
-                        throw new InvalidOperationException($"A propriedade '{nomeCampoId}' não existe na classe '{typeof(T).Name}'.");
+                        throw new InvalidOperationException($"A propriedade '{nomeCampoId}' nï¿½o existe na classe '{typeof(T).Name}'.");
 
                     // Mapeia a propriedade como Id
                     cm.MapIdMember(propInfo)
@@ -139,88 +139,11 @@ namespace OpenSim.Data.MongoDB
             return _collection.Find(combinedFilter).ToList().ToArray();
         }
 
-        /*
-        protected T[] DoQuery(MongoDBCommand cmd)
-        {
-            IDataReader reader = ExecuteReader(cmd, m_Connection);
-            if (reader == null)
-                return new T[0];
-
-            CheckColumnNames(reader);
-
-            List<T> result = new List<T>();
-
-            while (reader.Read())
-            {
-                T row = new T();
-
-                foreach (string name in m_Fields.Keys)
-                {
-                    if (m_Fields[name].GetValue(row) is bool)
-                    {
-                        int v = Convert.ToInt32(reader[name]);
-                        m_Fields[name].SetValue(row, v != 0 ? true : false);
-                    }
-                    else if (m_Fields[name].GetValue(row) is UUID)
-                    {
-                        UUID uuid = UUID.Zero;
-
-                        UUID.TryParse(reader[name].ToString(), out uuid);
-                        m_Fields[name].SetValue(row, uuid);
-                    }
-                    else if (m_Fields[name].GetValue(row) is int)
-                    {
-                        int v = Convert.ToInt32(reader[name]);
-                        m_Fields[name].SetValue(row, v);
-                    }
-                    else
-                    {
-                        m_Fields[name].SetValue(row, reader[name]);
-                    }
-                }
-
-                if (m_DataField != null)
-                {
-                    Dictionary<string, string> data =
-                            new Dictionary<string, string>();
-
-                    foreach (string col in m_ColumnNames)
-                    {
-                        data[col] = reader[col].ToString();
-                        if (data[col] == null)
-                            data[col] = String.Empty;
-                    }
-
-                    m_DataField.SetValue(row, data);
-                }
-
-                result.Add(row);
-            }
-
-            //CloseCommand(cmd);
-
-            return result.ToArray();
-        }
-        */
-
-        /*
-        public virtual T[] Get(string where)
-        {
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                string query = String.Format("select * from {0} where {1}",
-                        m_Realm, where);
-
-                cmd.CommandText = query;
-
-                return DoQuery(cmd);
-            }
-        }
-        */
+        
 
         public virtual bool Store(T row)
         {
-            // Obtém o tipo da classe T
+            // Obtï¿½m o tipo da classe T
             var type = typeof(T);
 
             // Procura a propriedade marcada com [BsonId]
@@ -232,20 +155,20 @@ namespace OpenSim.Data.MongoDB
                 throw new InvalidOperationException("A classe de dados deve ter uma propriedade marcada com [BsonId].");
             }
 
-            // Obtém o valor do _id
+            // Obtï¿½m o valor do _id
             var idValue = idProperty.GetValue(row);
             if (idValue == null)
             {
-                throw new InvalidOperationException("O valor do campo [BsonId] não pode ser nulo.");
+                throw new InvalidOperationException("O valor do campo [BsonId] nï¿½o pode ser nulo.");
             }
 
             // Cria o filtro para localizar o documento com o mesmo _id
             var filter = Builders<T>.Filter.Eq(idProperty.Name, idValue);
 
-            // Define as opções de substituição com upsert
+            // Define as opï¿½ï¿½es de substituiï¿½ï¿½o com upsert
             var options = new ReplaceOptions { IsUpsert = true };
 
-            // Executa a substituição ou inserção
+            // Executa a substituiï¿½ï¿½o ou inserï¿½ï¿½o
             var result = _collection.ReplaceOne(filter, row, options);
 
             return result.IsAcknowledged && (result.ModifiedCount > 0 || result.UpsertedId != null);
@@ -281,7 +204,7 @@ namespace OpenSim.Data.MongoDB
             if (ids == null || !ids.Any())
                 return Array.Empty<bool>();
 
-            // Cria filtro para verificar se o campo de ID está contido na lista
+            // Cria filtro para verificar se o campo de ID estï¿½ contido na lista
             var filter = Builders<T>.Filter.In(idField, ids);
 
             // Projeta apenas o campo de ID
@@ -308,10 +231,10 @@ namespace OpenSim.Data.MongoDB
         }
         public bool ItemExists<T>(string id, Expression<Func<T, object>> idField, IMongoCollection<T> collection)
         {
-            // Reutiliza a rotina para múltiplos, passando apenas um valor
+            // Reutiliza a rotina para mï¿½ltiplos, passando apenas um valor
             var resultArray = ItemsExist<T>(new[] { id }, idField, collection);
 
-            // Retorna o primeiro (e único) resultado
+            // Retorna o primeiro (e ï¿½nico) resultado
             return resultArray.Length > 0 && resultArray[0];
         }
 

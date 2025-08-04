@@ -48,44 +48,48 @@ namespace OpenSim.Data.MongoDB
 
         public UserAccountData[] GetUsers(UUID scopeID, string query)
         {
-            string[] words = query.Split();
+            string[] words = query.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
-            for (int i = 0 ; i < words.Length ; i++)
-            {
-                if (words[i].Length < 3)
-                {
-                    if (i != words.Length - 1)
-                        Array.Copy(words, i + 1, words, i, words.Length - i - 1);
-                    Array.Resize(ref words, words.Length - 1);
-                }
-            }
-
-            if (words.Length == 0)
+            if (words.Length == 0 || words.Length > 2)
                 return new UserAccountData[0];
 
-            if (words.Length > 2)
-                return new UserAccountData[0];
+            var filters = new List<FilterDefinition<UserAccountData>>();
 
-            using (MongoDBCommand cmd = new MongoDBCommand())
+            // ScopeID filter
+            filters.Add(Builders<UserAccountData>.Filter.Or(
+                Builders<UserAccountData>.Filter.Eq(u => u.ScopeID, scopeID),
+                Builders<UserAccountData>.Filter.Eq(u => u.ScopeID, UUID.Zero)
+            ));
+
+            // Name filters
+            if (words.Length == 1)
             {
-                if (words.Length == 1)
-                {
-                    cmd.CommandText = String.Format("select * from {0} where (ScopeID='{1}' or ScopeID='00000000-0000-0000-0000-000000000000') and (FirstName like '{2}%' or LastName like '{2}%')",
-                        m_Realm, scopeID.ToString(), words[0]);
-                }
-                else
-                {
-                    cmd.CommandText = String.Format("select * from {0} where (ScopeID='{1}' or ScopeID='00000000-0000-0000-0000-000000000000') and (FirstName like '{2}%' or LastName like '{3}%')",
-                        m_Realm, scopeID.ToString(), words[0], words[1]);
-                }
-
-                return DoQuery(cmd);
+                filters.Add(Builders<UserAccountData>.Filter.Or(
+                    Builders<UserAccountData>.Filter.Regex(u => u.FirstName, new BsonRegularExpression("^" + words[0], "i")),
+                    Builders<UserAccountData>.Filter.Regex(u => u.LastName, new BsonRegularExpression("^" + words[0], "i"))
+                ));
             }
+            else // words.Length == 2
+            {
+                filters.Add(Builders<UserAccountData>.Filter.Or(
+                    Builders<UserAccountData>.Filter.Regex(u => u.FirstName, new BsonRegularExpression("^" + words[0], "i")),
+                    Builders<UserAccountData>.Filter.Regex(u => u.LastName, new BsonRegularExpression("^" + words[1], "i"))
+                ));
+            }
+
+            var combinedFilter = Builders<UserAccountData>.Filter.And(filters);
+
+            return Collection.Find(combinedFilter).ToList().ToArray();
         }
 
         public UserAccountData[] GetUsersWhere(UUID scopeID, string where)
         {
-            return null;
+            // This method is intended for more complex, dynamic queries.
+            // Directly translating an arbitrary 'where' string to a MongoDB filter
+            // can be complex and potentially insecure. For now, it returns an empty array.
+            // If full functionality is required, a specific query parsing mechanism
+            // or a more structured input would be needed.
+            return new UserAccountData[0];
         }
     }
 }

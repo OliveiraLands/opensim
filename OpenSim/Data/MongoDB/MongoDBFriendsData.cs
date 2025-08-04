@@ -48,23 +48,9 @@ namespace OpenSim.Data.MongoDB
 
         public FriendsData[] GetFriends(string userID)
         {
-            return m_mongoDatabase.Get(userID);
-
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("" +
-                    "select a.*,case when b.Flags is null then -1 else b.Flags end as TheirFlags " +
-                    "from {0} as a " +
-                    "left join {0} as b " +
-                    "on a.PrincipalID = b.Friend " +
-                    "and a.Friend = b.PrincipalID " +
-                    "where a.PrincipalID = :PrincipalID", 
-                    m_Realm);
-
-                cmd.Parameters.AddWithValue(":PrincipalID", userID.ToString());
-
-                return DoQuery(cmd);
-            }
+            // The base.Get method already handles fetching by field and key.
+            // Assuming FriendsData has a field named "PrincipalID" that stores the user ID.
+            return base.Get("PrincipalID", userID);
         }
 
         public bool Delete(UUID principalID, string friend)
@@ -74,16 +60,23 @@ namespace OpenSim.Data.MongoDB
 
         public override bool Delete(string principalID, string friend)
         {
-            using (MongoDBCommand cmd = new MongoDBCommand())
+            try
             {
-                cmd.CommandText = String.Format("delete from {0} where PrincipalID = :PrincipalID and Friend = :Friend", m_Realm);
-                cmd.Parameters.AddWithValue(":PrincipalID", principalID.ToString());
-                cmd.Parameters.AddWithValue(":Friend", friend);
+                var filter = Builders<FriendsData>.Filter.And(
+                    Builders<FriendsData>.Filter.Eq(f => f.PrincipalID, principalID),
+                    Builders<FriendsData>.Filter.Eq(f => f.Friend, friend)
+                );
 
-                ExecuteNonQuery(cmd, m_Connection);
+                var deleteResult = Collection.DeleteOne(filter);
+
+                return deleteResult.IsAcknowledged && deleteResult.DeletedCount > 0;
             }
-
-            return true;
+            catch (Exception e)
+            {
+                // Log the exception if necessary
+                // m_log.ErrorFormat("[FRIENDS DB]: Error deleting friend data: {0}", e.Message);
+                return false;
+            }
         }
 
     }

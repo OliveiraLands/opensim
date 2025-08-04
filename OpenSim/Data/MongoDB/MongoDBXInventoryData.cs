@@ -26,17 +26,13 @@
  */
 
 using System;
-using System.Data;
 using System.Reflection;
 using System.Collections.Generic;
-#if CSharpMongoDB
-    using Community.CsharpMongoDB.MongoDB;
-#else
-    using Mono.Data.MongoDB;
-#endif
 using log4net;
 using OpenMetaverse;
 using OpenSim.Framework;
+using MongoDB.Driver;
+using MongoDB.Bson;
 
 namespace OpenSim.Data.MongoDB
 {
@@ -52,8 +48,6 @@ namespace OpenSim.Data.MongoDB
 
         public MongoDBXInventoryData(string conn, string realm)
         {
-            DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
-
             m_Folders = new MongoDBFolderHandler(
                     conn, "inventoryfolders", "XInventoryStore");
             m_Items = new MongoDBItemHandler(
@@ -193,15 +187,13 @@ namespace OpenSim.Data.MongoDB
 
             UUID oldParent = retrievedItems[0].parentFolderID;
 
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("update {0} set parentFolderID = :ParentFolderID where inventoryID = :InventoryID", m_Realm);
-                cmd.Parameters.Add(new MongoDBParameter(":ParentFolderID", newParent));
-                cmd.Parameters.Add(new MongoDBParameter(":InventoryID", id));
+            var filter = Builders<XInventoryItem>.Filter.Eq("inventoryID", id);
+            var update = Builders<XInventoryItem>.Update.Set("parentFolderID", newParent);
 
-                if (ExecuteNonQuery(cmd, m_Connection) == 0)
-                    return false;
-            }
+            var result = Collection.UpdateOne(filter, update);
+
+            if (!result.IsAcknowledged || result.ModifiedCount == 0)
+                return false;
 
             IncrementFolderVersion(oldParent);
             IncrementFolderVersion(newParent);
@@ -211,39 +203,34 @@ namespace OpenSim.Data.MongoDB
 
         public XInventoryItem[] GetActiveGestures(UUID principalID)
         {
-            using (MongoDBCommand cmd  = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("select * from inventoryitems where avatarId = :uuid and assetType = :type and flags = 1", m_Realm);
+            var filter = Builders<XInventoryItem>.Filter.And(
+                Builders<XInventoryItem>.Filter.Eq("avatarID", principalID),
+                Builders<XInventoryItem>.Filter.Eq("assetType", (int)AssetType.Gesture),
+                Builders<XInventoryItem>.Filter.Eq("flags", 1)
+            );
 
-                cmd.Parameters.Add(new MongoDBParameter(":uuid", principalID.ToString()));
-                cmd.Parameters.Add(new MongoDBParameter(":type", (int)AssetType.Gesture));
-
-                return DoQuery(cmd);
-            }
+            return Collection.Find(filter).ToList().ToArray();
         }
 
         public int GetAssetPermissions(UUID principalID, UUID assetID)
         {
-            IDataReader reader;
+            var filter = Builders<XInventoryItem>.Filter.And(
+                Builders<XInventoryItem>.Filter.Eq("avatarID", principalID),
+                Builders<XInventoryItem>.Filter.Eq("assetID", assetID)
+            );
 
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("select inventoryCurrentPermissions from inventoryitems where avatarID = :PrincipalID and assetID = :AssetID", m_Realm);
-                cmd.Parameters.Add(new MongoDBParameter(":PrincipalID", principalID.ToString()));
-                cmd.Parameters.Add(new MongoDBParameter(":AssetID", assetID.ToString()));
+            var projection = Builders<XInventoryItem>.Projection.Include(item => item.inventoryCurrentPermissions);
 
-                reader = ExecuteReader(cmd, m_Connection);
-            }
+            var items = Collection.Find(filter).Project<BsonDocument>(projection).ToList();
 
             int perms = 0;
-
-            while (reader.Read())
+            foreach (var item in items)
             {
-                perms |= Convert.ToInt32(reader["inventoryCurrentPermissions"]);
+                if (item.Contains("inventoryCurrentPermissions"))
+                {
+                    perms |= item["inventoryCurrentPermissions"].AsInt32;
+                }
             }
-
-            reader.Close();
-            //CloseCommand(cmd);
 
             return perms;
         }
@@ -275,15 +262,13 @@ namespace OpenSim.Data.MongoDB
 
             UUID oldParentFolderUUID = folders[0].parentFolderID;
 
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("update {0} set parentFolderID = :ParentFolderID where folderID = :FolderID", m_Realm);
-                cmd.Parameters.Add(new MongoDBParameter(":ParentFolderID", newParentFolderID));
-                cmd.Parameters.Add(new MongoDBParameter(":FolderID", id));
+            var filter = Builders<XInventoryFolder>.Filter.Eq("folderID", id);
+            var update = Builders<XInventoryFolder>.Update.Set("parentFolderID", newParentFolderID);
 
-                if (ExecuteNonQuery(cmd, m_Connection) == 0)
-                    return false;
-            }
+            var result = Collection.UpdateOne(filter, update);
+
+            if (!result.IsAcknowledged || result.ModifiedCount == 0)
+                return false;
 
             IncrementFolderVersion(oldParentFolderUUID);
             IncrementFolderVersion(newParentFolderID);
@@ -295,7 +280,12 @@ namespace OpenSim.Data.MongoDB
 
     public class MongoDBInventoryHandler<T> : MongoDBGenericTableHandler<T> where T: class, new()
     {
-        public MongoDBInventoryHandler(string c, string t, string m) : base(c, t, m) {}
+        private IMongoCollection<XInventoryFolder> m_folderCollection;
+
+        public MongoDBInventoryHandler(string c, string t, string m) : base(c, t, m)
+        {
+            m_folderCollection = m_mongoDatabase.GetCollection<XInventoryFolder>("inventoryfolders");
+        }
 
         protected bool IncrementFolderVersion(UUID folderID)
         {
@@ -304,19 +294,13 @@ namespace OpenSim.Data.MongoDB
 
         protected bool IncrementFolderVersion(string folderID)
         {
-//            m_log.DebugFormat("[MYSQL ITEM HANDLER]: Incrementing version on folder {0}", folderID);
-//            Util.PrintCallStack();
+            var filter = Builders<XInventoryFolder>.Filter.Eq("folderID", folderID);
+            var update = Builders<XInventoryFolder>.Update.Inc("version", 1);
 
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = "update inventoryfolders set version=version+1 where folderID = :folderID";
-                cmd.Parameters.Add(new MongoDBParameter(":folderID", folderID));
+            var result = m_folderCollection.UpdateOne(filter, update);
 
-                if(ExecuteNonQuery(cmd, m_Connection) == 0)
-                    return false;
-            }
-
-            return true;
+            return result.IsAcknowledged && result.ModifiedCount > 0;
         }
     }
+
 }

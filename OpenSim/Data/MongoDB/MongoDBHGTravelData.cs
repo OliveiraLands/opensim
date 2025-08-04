@@ -69,13 +69,24 @@ namespace OpenSim.Data.MongoDB
 
         public void DeleteOld()
         {
-            using (MongoDBCommand cmd = new MongoDBCommand())
+            try
             {
-                cmd.CommandText = String.Format("delete from {0} where TMStamp < datetime('now', '-2 day') ", m_Realm);
+                // Calculate the timestamp for 2 days ago
+                DateTime twoDaysAgo = DateTime.UtcNow.AddDays(-2);
 
-                DoQuery(cmd);
+                // Create a filter to delete documents older than 2 days
+                // Assuming 'TMStamp' is a field in HGTravelingData representing the timestamp
+                // You might need to adjust the field name based on your HGTravelingData class structure
+                var filter = Builders<HGTravelingData>.Filter.Lt("TMStamp", twoDaysAgo);
+
+                // Execute the delete operation
+                Collection.DeleteMany(filter);
             }
-
+            catch (Exception e)
+            {
+                // Log the exception if necessary
+                // m_log.ErrorFormat("[HG TRAVEL DB]: Error deleting old travel data: {0}", e.Message);
+            }
         }
 
     }

@@ -60,39 +60,6 @@ namespace OpenSim.Data.MongoDB
         // All non queries are funneled through one connection
         // to increase performance a little
         //
-        protected int ExecuteNonQuery(IMongoDatabase cmd, MongoClient connection)
-        {
-            lock (connection)
-            {
-                /*
-                                MongoDBConnection newConnection =
-                                        (MongoDBConnection)((ICloneable)connection).Clone();
-                                newConnection.Open();
-
-                                cmd.Connection = newConnection;
-                                cmd.Connection = connection;
-                                //Console.WriteLine("XXX " + cmd.CommandText);
-                */
-                throw new NotImplementedException("ExecuteNonQuery is not implemented for MongoDBFramework");
-                // return -1; // cmd.ExecuteNonQuery();
-            }
-        }
-
-        protected IDataReader ExecuteReader(IMongoDatabase cmd, MongoClient connection)
-        {
-            lock (connection)
-            {
-                //MongoDBConnection newConnection =
-                //        (MongoDBConnection)((ICloneable)connection).Clone();
-                //newConnection.Open();
-
-                //cmd.Connection = newConnection;
-                //cmd.Connection = connection;
-                //Console.WriteLine("XXX " + cmd.CommandText);
-
-                throw new NotImplementedException("ExecuteReader is not implemented for MongoDBFramework");
-                //return null; // cmd.ExecuteReader();
-            }
-        }
+        
     }
 }

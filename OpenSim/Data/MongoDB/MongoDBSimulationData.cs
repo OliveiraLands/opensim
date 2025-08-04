@@ -27,2960 +27,1198 @@
 
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Drawing;
-using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 using log4net;
-#if CSharpMongoDB
-    using Community.CsharpMongoDB.MongoDB;
-#else
-using Mono.Data.MongoDB;
-#endif
 using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Driver;
 
 namespace OpenSim.Data.MongoDB
 {
+    public class PrimDocument
+    {
+        [BsonId]
+        public Guid UUID { get; set; }
+        public Guid RegionUUID { get; set; }
+        public int CreationDate { get; set; }
+        public string Name { get; set; }
+        public Guid SceneGroupID { get; set; }
+        public string Text { get; set; }
+        public int ColorR { get; set; }
+        public int ColorG { get; set; }
+        public int ColorB { get; set; }
+        public int ColorA { get; set; }
+        public string Description { get; set; }
+        public string SitName { get; set; }
+        public string TouchName { get; set; }
+        public uint ObjectFlags { get; set; }
+        public string CreatorID { get; set; }
+        public Guid OwnerID { get; set; }
+        public Guid GroupID { get; set; }
+        public Guid LastOwnerID { get; set; }
+        public Guid RezzerID { get; set; }
+        public uint OwnerMask { get; set; }
+        public uint NextOwnerMask { get; set; }
+        public uint GroupMask { get; set; }
+        public uint EveryoneMask { get; set; }
+        public uint BaseMask { get; set; }
+        public double PositionX { get; set; }
+        public double PositionY { get; set; }
+        public double PositionZ { get; set; }
+        public double GroupPositionX { get; set; }
+        public double GroupPositionY { get; set; }
+        public double GroupPositionZ { get; set; }
+        public double VelocityX { get; set; }
+        public double VelocityY { get; set; }
+        public double VelocityZ { get; set; }
+        public double AngularVelocityX { get; set; }
+        public double AngularVelocityY { get; set; }
+        public double AngularVelocityZ { get; set; }
+        public double AccelerationX { get; set; }
+        public double AccelerationY { get; set; }
+        public double AccelerationZ { get; set; }
+        public double RotationX { get; set; }
+        public double RotationY { get; set; }
+        public double RotationZ { get; set; }
+        public double RotationW { get; set; }
+        public double SitTargetOffsetX { get; set; }
+        public double SitTargetOffsetY { get; set; }
+        public double SitTargetOffsetZ { get; set; }
+        public double SitTargetOrientW { get; set; }
+        public double SitTargetOrientX { get; set; }
+        public double SitTargetOrientY { get; set; }
+        public double SitTargetOrientZ { get; set; }
+        public int PayPrice { get; set; }
+        public int PayButton1 { get; set; }
+        public int PayButton2 { get; set; }
+        public int PayButton3 { get; set; }
+        public int PayButton4 { get; set; }
+        public string LoopedSound { get; set; }
+        public double LoopedSoundGain { get; set; }
+        public string TextureAnimation { get; set; }
+        public string ParticleSystem { get; set; }
+        public double CameraEyeOffsetX { get; set; }
+        public double CameraEyeOffsetY { get; set; }
+        public double CameraEyeOffsetZ { get; set; }
+        public double CameraAtOffsetX { get; set; }
+        public double CameraAtOffsetY { get; set; }
+        public double CameraAtOffsetZ { get; set; }
+        public short ForceMouselook { get; set; }
+        public int ScriptAccessPin { get; set; }
+        public short AllowedDrop { get; set; }
+        public short DieAtEdge { get; set; }
+        public int SalePrice { get; set; }
+        public short SaleType { get; set; }
+        public byte ClickAction { get; set; }
+        public byte Material { get; set; }
+        public string CollisionSound { get; set; }
+        public double CollisionSoundVolume { get; set; }
+        public short VolumeDetect { get; set; }
+        public string MediaURL { get; set; }
+        public double AttachedPosX { get; set; }
+        public double AttachedPosY { get; set; }
+        public double AttachedPosZ { get; set; }
+        public string DynAttrs { get; set; }
+        public byte PhysicsShapeType { get; set; }
+        public double Density { get; set; }
+        public double GravityModifier { get; set; }
+        public double Friction { get; set; }
+        public double Restitution { get; set; }
+        public byte[] KeyframeMotion { get; set; }
+        public bool PassTouches { get; set; }
+        public bool PassCollisions { get; set; }
+        public byte RotationAxisLocks { get; set; }
+        public string Vehicle { get; set; }
+        public string PhysInertia { get; set; }
+        public float standtargetx { get; set; }
+        public float standtargety { get; set; }
+        public float standtargetz { get; set; }
+        public float sitactrange { get; set; }
+        public int pseudocrc { get; set; }
+        public byte[] sopanims { get; set; }
+        public byte[] lnkstBinData { get; set; }
+        public string StartStr { get; set; }
+    }
+
+    public class ShapeDocument
+    {
+        [BsonId]
+        public Guid UUID { get; set; }
+        public int Shape { get; set; }
+        public double ScaleX { get; set; }
+        public double ScaleY { get; set; }
+        public double ScaleZ { get; set; }
+        public int PCode { get; set; }
+        public int PathBegin { get; set; }
+        public int PathEnd { get; set; }
+        public int PathScaleX { get; set; }
+        public int PathScaleY { get; set; }
+        public int PathShearX { get; set; }
+        public int PathShearY { get; set; }
+        public int PathSkew { get; set; }
+        public int PathCurve { get; set; }
+        public int PathRadiusOffset { get; set; }
+        public int PathRevolutions { get; set; }
+        public int PathTaperX { get; set; }
+        public int PathTaperY { get; set; }
+        public int PathTwist { get; set; }
+        public int PathTwistBegin { get; set; }
+        public int ProfileBegin { get; set; }
+        public int ProfileEnd { get; set; }
+        public int ProfileCurve { get; set; }
+        public int ProfileHollow { get; set; }
+        public int State { get; set; }
+        public int LastAttachPoint { get; set; }
+        public byte[] Texture { get; set; }
+        public byte[] ExtraParams { get; set; }
+        public string Media { get; set; }
+        public byte[] MatOvrd { get; set; }
+    }
+
+    public class TerrainDocument
+    {
+        [BsonId]
+        public Guid RegionUUID { get; set; }
+        public int Revision { get; set; }
+        public byte[] Heightfield { get; set; }
+    }
+
+    public class BakedTerrainDocument
+    {
+        [BsonId]
+        public Guid RegionUUID { get; set; }
+        public int Revision { get; set; }
+        public byte[] Heightfield { get; set; }
+    }
+
+    public class ItemDocument
+    {
+        [BsonId]
+        public Guid itemID { get; set; }
+        public Guid primID { get; set; }
+        public Guid assetID { get; set; }
+        public Guid parentFolderID { get; set; }
+        public int invType { get; set; }
+        public int assetType { get; set; }
+        public string name { get; set; }
+        public string description { get; set; }
+        public long creationDate { get; set; }
+        public string creatorID { get; set; }
+        public Guid ownerID { get; set; }
+        public Guid lastOwnerID { get; set; }
+        public Guid groupID { get; set; }
+        public uint nextPermissions { get; set; }
+        public uint currentPermissions { get; set; }
+        public uint basePermissions { get; set; }
+        public uint everyonePermissions { get; set; }
+        public uint groupPermissions { get; set; }
+        public uint flags { get; set; }
+    }
+
+    public class LandDocument
+    {
+        [BsonId]
+        public Guid UUID { get; set; }
+        public Guid RegionUUID { get; set; }
+        public uint LocalLandID { get; set; }
+        public byte[] Bitmap { get; set; }
+        public string Name { get; set; }
+        public string Desc { get; set; }
+        public Guid OwnerUUID { get; set; }
+        public bool IsGroupOwned { get; set; }
+        public int Area { get; set; }
+        public int AuctionID { get; set; }
+        public int Category { get; set; }
+        public int ClaimDate { get; set; }
+        public int ClaimPrice { get; set; }
+        public Guid GroupUUID { get; set; }
+        public int SalePrice { get; set; }
+        public int LandStatus { get; set; }
+        public uint LandFlags { get; set; }
+        public byte LandingType { get; set; }
+        public byte MediaAutoScale { get; set; }
+        public Guid MediaTextureUUID { get; set; }
+        public string MediaURL { get; set; }
+        public string MusicURL { get; set; }
+        public double PassHours { get; set; }
+        public uint PassPrice { get; set; }
+        public Guid SnapshotUUID { get; set; }
+        public double UserLocationX { get; set; }
+        public double UserLocationY { get; set; }
+        public double UserLocationZ { get; set; }
+        public double UserLookAtX { get; set; }
+        public double UserLookAtY { get; set; }
+        public double UserLookAtZ { get; set; }
+        public Guid AuthbuyerID { get; set; }
+        public int OtherCleanTime { get; set; }
+        public int Dwell { get; set; }
+        public string MediaType { get; set; }
+        public string MediaDescription { get; set; }
+        public string MediaSize { get; set; }
+        public bool MediaLoop { get; set; }
+        public bool ObscureMedia { get; set; }
+        public bool ObscureMusic { get; set; }
+        public bool SeeAVs { get; set; }
+        public bool AnyAVSounds { get; set; }
+        public bool GroupAVSounds { get; set; }
+        public string environment { get; set; }
+    }
+
+    public class LandAccessDocument
+    {
+        [BsonId]
+        public ObjectId Id { get; set; } // MongoDB's default ObjectId
+        public Guid LandUUID { get; set; }
+        public Guid AccessUUID { get; set; }
+        public uint Flags { get; set; }
+    }
+
+    public class RegionSettingsDocument
+    {
+        [BsonId]
+        public Guid regionUUID { get; set; }
+        public int block_terraform { get; set; }
+        public int block_fly { get; set; }
+        public int allow_damage { get; set; }
+        public int restrict_pushing { get; set; }
+        public int allow_land_resell { get; set; }
+        public int allow_land_join_divide { get; set; }
+        public int block_show_in_search { get; set; }
+        public int agent_limit { get; set; }
+        public double object_bonus { get; set; }
+        public int maturity { get; set; }
+        public int disable_scripts { get; set; }
+        public int disable_collisions { get; set; }
+        public int disable_physics { get; set; }
+        public string terrain_texture_1 { get; set; }
+        public string terrain_texture_2 { get; set; }
+        public string terrain_texture_3 { get; set; }
+        public string terrain_texture_4 { get; set; }
+        public string TerrainPBR1 { get; set; }
+        public string TerrainPBR2 { get; set; }
+        public string TerrainPBR3 { get; set; }
+        public string TerrainPBR4 { get; set; }
+        public double elevation_1_nw { get; set; }
+        public double elevation_2_nw { get; set; }
+        public double elevation_1_ne { get; set; }
+        public double elevation_2_ne { get; set; }
+        public double elevation_1_se { get; set; }
+        public double elevation_2_se { get; set; }
+        public double elevation_1_sw { get; set; }
+        public double elevation_2_sw { get; set; }
+        public double water_height { get; set; }
+        public double terrain_raise_limit { get; set; }
+        public double terrain_lower_limit { get; set; }
+        public int use_estate_sun { get; set; }
+        public int sandbox { get; set; }
+        public double sunvectorx { get; set; }
+        public double sunvectory { get; set; }
+        public double sunvectorz { get; set; }
+        public int fixed_sun { get; set; }
+        public double sun_position { get; set; }
+        public string covenant { get; set; }
+        public int covenant_datetime { get; set; }
+        public string map_tile_ID { get; set; }
+        public string TelehubObject { get; set; }
+        public string parcel_tile_ID { get; set; }
+        public bool block_search { get; set; }
+        public bool casino { get; set; }
+        public string cacheID { get; set; }
+    }
+
+    public class RegionEnvironmentDocument
+    {
+        [BsonId]
+        public Guid region_id { get; set; }
+        public string llsd_settings { get; set; }
+    }
+    
+    public class ExtraDocument
+    {
+        [BsonId]
+        public ObjectId Id { get; set; }
+        public Guid RegionID { get; set; }
+        public string Name { get; set; }
+        public string Value { get; set; }
+    }
+
     /// <summary>
     /// A RegionData Interface to the MongoDB database
     /// </summary>
     public class MongoDBSimulationData : ISimulationDataStore
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        private static readonly string LogHeader = "[REGION DB MongoDB]";
 
-        private const string primSelect = "select * from prims";
-        private const string shapeSelect = "select * from primshapes";
-        private const string itemsSelect = "select * from primitems";
-        private const string terrainSelect = "select * from terrain limit 1";
-        private const string landSelect = "select * from land";
-        private const string landAccessListSelect = "select distinct * from landaccesslist";
-        private const string regionbanListSelect = "select * from regionban";
-        private const string regionSettingsSelect = "select * from regionsettings";
-        private const string regionWindlightSelect = "select * from regionwindlight";
-        private const string regionEnvironmentSelect = "select * from regionenvironment";
-        private const string regionSpawnPointsSelect = "select * from spawn_points";
+        private MongoClient m_client;
+        private IMongoDatabase m_database;
 
-        private DataSet ds;
-        private MongoDBDataAdapter primDa;
-        private MongoDBDataAdapter shapeDa;
-        private MongoDBDataAdapter itemsDa;
-        private MongoDBDataAdapter terrainDa;
-        private MongoDBDataAdapter landDa;
-        private MongoDBDataAdapter landAccessListDa;
-        private MongoDBDataAdapter regionSettingsDa;
-        private MongoDBDataAdapter regionWindlightDa;
-        private MongoDBDataAdapter regionEnvironmentDa;
-        private MongoDBDataAdapter regionSpawnPointsDa;
+        private IMongoCollection<PrimDocument> m_primsCollection;
+        private IMongoCollection<ShapeDocument> m_shapesCollection;
+        private IMongoCollection<ItemDocument> m_itemsCollection;
+        private IMongoCollection<TerrainDocument> m_terrainCollection;
+        private IMongoCollection<BakedTerrainDocument> m_bakedTerrainCollection;
+        private IMongoCollection<LandDocument> m_landCollection;
+        private IMongoCollection<LandAccessDocument> m_landAccessListCollection;
+        private IMongoCollection<RegionSettingsDocument> m_regionSettingsCollection;
+        private IMongoCollection<RegionEnvironmentDocument> m_regionEnvironmentCollection;
+        private IMongoCollection<ExtraDocument> m_extraCollection;
 
-        private MongoDBConnection m_conn;
-        private String m_connectionString;
-
-        protected virtual Assembly Assembly
-        {
-            get { return GetType().Assembly; }
-        }
-
-        public MongoDBSimulationData()
-        {
-        }
-
-        public MongoDBSimulationData(string connectionString)
-        {
-            Initialise(connectionString);
-        }
-
-        // Temporary attribute while this is experimental
-
-        /***********************************************************************
-         *
-         *  Public Interface Functions
-         *
-         **********************************************************************/
-
-        /// <summary>
-        /// <list type="bullet">
-        /// <item>Initialises RegionData Interface</item>
-        /// <item>Loads and initialises a new MongoDB connection and maintains it.</item>
-        /// </list>
-        /// </summary>
-        /// <param name="connectionString">the connection string</param>
         public void Initialise(string connectionString)
         {
             try
             {
-                DllmapConfigHelper.RegisterAssembly(typeof(MongoDBConnection).Assembly);
+                m_log.InfoFormat("[MONGODB SIMULATION]: Connecting to {0}", connectionString);
+                var settings = MongoClientSettings.FromUrl(new MongoUrl(connectionString));
+                m_client = new MongoClient(settings);
+                var url = new MongoUrl(connectionString);
+                m_database = m_client.GetDatabase(url.DatabaseName ?? "opensim");
 
-                m_connectionString = connectionString;
+                m_primsCollection = m_database.GetCollection<PrimDocument>("prims");
+                m_shapesCollection = m_database.GetCollection<ShapeDocument>("primshapes");
+                m_itemsCollection = m_database.GetCollection<ItemDocument>("primitems");
+                m_terrainCollection = m_database.GetCollection<TerrainDocument>("terrain");
+                m_bakedTerrainCollection = m_database.GetCollection<BakedTerrainDocument>("bakedterrain");
+                m_landCollection = m_database.GetCollection<LandDocument>("land");
+                m_landAccessListCollection = m_database.GetCollection<LandAccessDocument>("landaccesslist");
+                m_regionSettingsCollection = m_database.GetCollection<RegionSettingsDocument>("regionsettings");
+                m_regionEnvironmentCollection = m_database.GetCollection<RegionEnvironmentDocument>("regionenvironment");
+                m_extraCollection = m_database.GetCollection<ExtraDocument>("region_extra");
 
-                ds = new DataSet("Region");
-
-                m_log.Info("[MongoDB REGION DB]: MongoDB - connecting: " + connectionString);
-                m_conn = new MongoDBConnection(m_connectionString);
-                m_conn.Open();
-
-                MongoDBCommand primSelectCmd = new MongoDBCommand(primSelect, m_conn);
-                primDa = new MongoDBDataAdapter(primSelectCmd);
-
-                MongoDBCommand shapeSelectCmd = new MongoDBCommand(shapeSelect, m_conn);
-                shapeDa = new MongoDBDataAdapter(shapeSelectCmd);
-                // MongoDBCommandBuilder shapeCb = new MongoDBCommandBuilder(shapeDa);
-
-                MongoDBCommand itemsSelectCmd = new MongoDBCommand(itemsSelect, m_conn);
-                itemsDa = new MongoDBDataAdapter(itemsSelectCmd);
-
-                MongoDBCommand terrainSelectCmd = new MongoDBCommand(terrainSelect, m_conn);
-                terrainDa = new MongoDBDataAdapter(terrainSelectCmd);
-
-                MongoDBCommand landSelectCmd = new MongoDBCommand(landSelect, m_conn);
-                landDa = new MongoDBDataAdapter(landSelectCmd);
-
-                MongoDBCommand landAccessListSelectCmd = new MongoDBCommand(landAccessListSelect, m_conn);
-                landAccessListDa = new MongoDBDataAdapter(landAccessListSelectCmd);
-
-                MongoDBCommand regionSettingsSelectCmd = new MongoDBCommand(regionSettingsSelect, m_conn);
-                regionSettingsDa = new MongoDBDataAdapter(regionSettingsSelectCmd);
-
-                MongoDBCommand regionWindlightSelectCmd = new MongoDBCommand(regionWindlightSelect, m_conn);
-                regionWindlightDa = new MongoDBDataAdapter(regionWindlightSelectCmd);
-
-                MongoDBCommand regionEnvironmentSelectCmd = new MongoDBCommand(regionEnvironmentSelect, m_conn);
-                regionEnvironmentDa = new MongoDBDataAdapter(regionEnvironmentSelectCmd);
-
-                MongoDBCommand regionSpawnPointsSelectCmd = new MongoDBCommand(regionSpawnPointsSelect, m_conn);
-                regionSpawnPointsDa = new MongoDBDataAdapter(regionSpawnPointsSelectCmd);
-
-                // This actually does the roll forward assembly stuff
-                Migration m = new Migration(m_conn, Assembly, "RegionStore");
-                m.Update();
-
-                lock (ds)
-                {
-                    ds.Tables.Add(createPrimTable());
-                    setupPrimCommands(primDa, m_conn);
-
-                    ds.Tables.Add(createShapeTable());
-                    setupShapeCommands(shapeDa, m_conn);
-
-                    ds.Tables.Add(createItemsTable());
-                    setupItemsCommands(itemsDa, m_conn);
-
-                    ds.Tables.Add(createTerrainTable());
-                    setupTerrainCommands(terrainDa, m_conn);
-
-                    ds.Tables.Add(createLandTable());
-                    setupLandCommands(landDa, m_conn);
-
-                    ds.Tables.Add(createLandAccessListTable());
-                    setupLandAccessCommands(landAccessListDa, m_conn);
-
-                    ds.Tables.Add(createRegionSettingsTable());
-                    setupRegionSettingsCommands(regionSettingsDa, m_conn);
-
-                    ds.Tables.Add(createRegionWindlightTable());
-                    setupRegionWindlightCommands(regionWindlightDa, m_conn);
-
-                    ds.Tables.Add(createRegionEnvironmentTable());
-                    setupRegionEnvironmentCommands(regionEnvironmentDa, m_conn);
-
-                    ds.Tables.Add(createRegionSpawnPointsTable());
-                    setupRegionSpawnPointsCommands(regionSpawnPointsDa, m_conn);
-
-                    // WORKAROUND: This is a work around for MongoDB on
-                    // windows, which gets really unhappy with blob columns
-                    // that have no sample data in them.  At some point we
-                    // need to actually find a proper way to handle this.
-                    try
-                    {
-                        primDa.Fill(ds.Tables["prims"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on prims table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        shapeDa.Fill(ds.Tables["primshapes"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on primshapes table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        itemsDa.Fill(ds.Tables["primitems"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on primitems table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        terrainDa.Fill(ds.Tables["terrain"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on terrain table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        landDa.Fill(ds.Tables["land"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on land table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        landAccessListDa.Fill(ds.Tables["landaccesslist"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on landaccesslist table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        regionSettingsDa.Fill(ds.Tables["regionsettings"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionsettings table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        regionWindlightDa.Fill(ds.Tables["regionwindlight"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionwindlight table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        regionEnvironmentDa.Fill(ds.Tables["regionenvironment"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on regionenvironment table :{0}", e.Message);
-                    }
-
-                    try
-                    {
-                        regionSpawnPointsDa.Fill(ds.Tables["spawn_points"]);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.ErrorFormat("[MongoDB REGION DB]: Caught fill error on spawn_points table :{0}", e.Message);
-                    }
-
-                    // We have to create a data set mapping for every table, otherwise the IDataAdaptor.Update() will not populate rows with values!
-                    // Not sure exactly why this is - this kind of thing was not necessary before - justincc 20100409
-                    // Possibly because we manually set up our own DataTables before connecting to the database
-                    CreateDataSetMapping(primDa, "prims");
-                    CreateDataSetMapping(shapeDa, "primshapes");
-                    CreateDataSetMapping(itemsDa, "primitems");
-                    CreateDataSetMapping(terrainDa, "terrain");
-                    CreateDataSetMapping(landDa, "land");
-                    CreateDataSetMapping(landAccessListDa, "landaccesslist");
-                    CreateDataSetMapping(regionSettingsDa, "regionsettings");
-                    CreateDataSetMapping(regionWindlightDa, "regionwindlight");
-                    CreateDataSetMapping(regionEnvironmentDa, "regionenvironment");
-                    CreateDataSetMapping(regionSpawnPointsDa, "spawn_points");
-                }
+                // Create indexes for faster queries
+                m_primsCollection.Indexes.CreateOne(new CreateIndexModel<PrimDocument>(Builders<PrimDocument>.IndexKeys.Ascending(p => p.RegionUUID)));
+                m_itemsCollection.Indexes.CreateOne(new CreateIndexModel<ItemDocument>(Builders<ItemDocument>.IndexKeys.Ascending(i => i.primID)));
+                m_landCollection.Indexes.CreateOne(new CreateIndexModel<LandDocument>(Builders<LandDocument>.IndexKeys.Ascending(l => l.RegionUUID)));
+                m_landAccessListCollection.Indexes.CreateOne(new CreateIndexModel<LandAccessDocument>(Builders<LandAccessDocument>.IndexKeys.Ascending(la => la.LandUUID)));
             }
             catch (Exception e)
             {
-                m_log.ErrorFormat("[MongoDB REGION DB]: {0} - {1}", e.Message, e.StackTrace);
-                Environment.Exit(23);
-            }
-            return;
-        }
-
-        public void Dispose()
-        {
-            if (m_conn != null)
-            {
-                m_conn.Close();
-                m_conn = null;
-            }
-            if (ds != null)
-            {
-                ds.Dispose();
-                ds = null;
-            }
-            if (primDa != null)
-            {
-                primDa.Dispose();
-                primDa = null;
-            }
-            if (shapeDa != null)
-            {
-                shapeDa.Dispose();
-                shapeDa = null;
-            }
-            if (itemsDa != null)
-            {
-                itemsDa.Dispose();
-                itemsDa = null;
-            }
-            if (terrainDa != null)
-            {
-                terrainDa.Dispose();
-                terrainDa = null;
-            }
-            if (landDa != null)
-            {
-                landDa.Dispose();
-                landDa = null;
-            }
-            if (landAccessListDa != null)
-            {
-                landAccessListDa.Dispose();
-                landAccessListDa = null;
-            }
-            if (regionSettingsDa != null)
-            {
-                regionSettingsDa.Dispose();
-                regionSettingsDa = null;
-            }
-            if (regionWindlightDa != null)
-            {
-                regionWindlightDa.Dispose();
-                regionWindlightDa = null;
-            }
-            if (regionEnvironmentDa != null)
-            {
-                regionEnvironmentDa.Dispose();
-                regionEnvironmentDa = null;
-            }
-            if (regionSpawnPointsDa != null)
-            {
-                regionSpawnPointsDa.Dispose();
-                regionWindlightDa = null;
+                m_log.Fatal($"[MONGODB SIMULATION]: Couldn't connect to database: {e.Message}", e);
+                throw;
             }
         }
 
-        public void StoreRegionSettings(RegionSettings rs)
-        {
-            lock (ds)
-            {
-                DataTable regionsettings = ds.Tables["regionsettings"];
+        public void Dispose() { }
 
-                DataRow settingsRow = regionsettings.Rows.Find(rs.RegionUUID.ToString());
-                if (settingsRow == null)
-                {
-                    settingsRow = regionsettings.NewRow();
-                    fillRegionSettingsRow(settingsRow, rs);
-                    regionsettings.Rows.Add(settingsRow);
-                }
-                else
-                {
-                    fillRegionSettingsRow(settingsRow, rs);
-                }
+        public void Shutdown() { }
 
-                StoreSpawnPoints(rs);
-
-                Commit();
-            }
-
-        }
-
-        public void StoreSpawnPoints(RegionSettings rs)
-        {
-            lock (ds)
-            {
-                // DataTable spawnpoints = ds.Tables["spawn_points"];
-
-                // remove region's spawnpoints
-                using (
-                    MongoDBCommand cmd =
-                        new MongoDBCommand("delete from spawn_points where RegionID=:RegionID",
-                                          m_conn))
-                {
-
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionID", rs.RegionUUID.ToString()));
-                    cmd.ExecuteNonQuery();
-                }
-            }
-
-            foreach (SpawnPoint sp in rs.SpawnPoints())
-            {
-                using (MongoDBCommand cmd = new MongoDBCommand("insert into spawn_points(RegionID, Yaw, Pitch, Distance)" +
-                                                              "values ( :RegionID, :Yaw, :Pitch, :Distance)", m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionID", rs.RegionUUID.ToString()));
-                    cmd.Parameters.Add(new MongoDBParameter(":Yaw", sp.Yaw));
-                    cmd.Parameters.Add(new MongoDBParameter(":Pitch", sp.Pitch));
-                    cmd.Parameters.Add(new MongoDBParameter(":Distance", sp.Distance));
-                    cmd.ExecuteNonQuery();
-                }
-            }
-        }
-
-        #region Region Environment Settings
-        public string LoadRegionEnvironmentSettings(UUID regionUUID)
-        {
-            lock (ds)
-            {
-                DataTable environmentTable = ds.Tables["regionenvironment"];
-                DataRow row = environmentTable.Rows.Find(regionUUID.ToString());
-                if (row == null)
-                {
-                    return String.Empty;
-                }
-
-                return (String)row["llsd_settings"];
-            }
-        }
-
-        public void StoreRegionEnvironmentSettings(UUID regionUUID, string settings)
-        {
-            lock (ds)
-            {
-                DataTable environmentTable = ds.Tables["regionenvironment"];
-                DataRow row = environmentTable.Rows.Find(regionUUID.ToString());
-
-                if (row == null)
-                {
-                    row = environmentTable.NewRow();
-                    row["region_id"] = regionUUID.ToString();
-                    row["llsd_settings"] = settings;
-                    environmentTable.Rows.Add(row);
-                }
-                else
-                {
-                    row["llsd_settings"] = settings;
-                }
-
-                regionEnvironmentDa.Update(ds, "regionenvironment");
-            }
-        }
-
-        public void RemoveRegionEnvironmentSettings(UUID regionUUID)
-        {
-            lock (ds)
-            {
-                DataTable environmentTable = ds.Tables["regionenvironment"];
-                DataRow row = environmentTable.Rows.Find(regionUUID.ToString());
-
-                if (row != null)
-                {
-                    row.Delete();
-                }
-
-                regionEnvironmentDa.Update(ds, "regionenvironment");
-            }
-        }
-
-        #endregion
-
-        public RegionSettings LoadRegionSettings(UUID regionUUID)
-        {
-            lock (ds)
-            {
-                DataTable regionsettings = ds.Tables["regionsettings"];
-
-                string searchExp = "regionUUID = '" + regionUUID.ToString() + "'";
-                DataRow[] rawsettings = regionsettings.Select(searchExp);
-                if (rawsettings.Length == 0)
-                {
-                    RegionSettings rs = new RegionSettings();
-                    rs.RegionUUID = regionUUID;
-                    rs.OnSave += StoreRegionSettings;
-
-                    StoreRegionSettings(rs);
-
-                    return rs;
-                }
-                DataRow row = rawsettings[0];
-
-                RegionSettings newSettings = buildRegionSettings(row);
-                newSettings.OnSave += StoreRegionSettings;
-
-                LoadSpawnPoints(newSettings);
-
-                return newSettings;
-            }
-        }
-
-        private void LoadSpawnPoints(RegionSettings rs)
-        {
-            rs.ClearSpawnPoints();
-
-            DataTable spawnpoints = ds.Tables["spawn_points"];
-            string byRegion = "RegionID = '" + rs.RegionUUID + "'";
-            DataRow[] spForRegion = spawnpoints.Select(byRegion);
-
-            foreach (DataRow spRow in spForRegion)
-            {
-                SpawnPoint sp = new SpawnPoint();
-                sp.Pitch = (float)spRow["Pitch"];
-                sp.Yaw = (float)spRow["Yaw"];
-                sp.Distance = (float)spRow["Distance"];
-
-                rs.AddSpawnPoint(sp);
-            }
-        }
-
-        /// <summary>
-        /// Adds an object into region storage
-        /// </summary>
-        /// <param name="obj">the object</param>
-        /// <param name="regionUUID">the region UUID</param>
         public void StoreObject(SceneObjectGroup obj, UUID regionUUID)
         {
-            lock (ds)
+            foreach (SceneObjectPart prim in obj.Parts)
             {
-                foreach (SceneObjectPart prim in obj.Parts)
-                {
-                    //m_log.Info("[REGION DB]: Adding obj: " + obj.UUID + " to region: " + regionUUID);
-                    addPrim(prim, obj.UUID, regionUUID);
-                }
-                primDa.Update(ds, "prims");
-                shapeDa.Update(ds, "primshapes");
-                itemsDa.Update(ds, "primitems");
-                ds.AcceptChanges();
-            }
+                var primDoc = ConvertToPrimDocument(prim, obj.UUID, regionUUID);
+                m_primsCollection.ReplaceOne(p => p.UUID == prim.UUID, primDoc, new ReplaceOptions { IsUpsert = true });
 
-            // m_log.Info("[Dump of prims]: " + ds.GetXml());
+                var shapeDoc = ConvertToShapeDocument(prim.Shape, prim.UUID);
+                m_shapesCollection.ReplaceOne(s => s.UUID == prim.UUID, shapeDoc, new ReplaceOptions { IsUpsert = true });
+            }
         }
 
-        /// <summary>
-        /// Removes an object from region storage
-        /// </summary>
-        /// <param name="obj">the object</param>
-        /// <param name="regionUUID">the region UUID</param>
-        public void RemoveObject(UUID obj, UUID regionUUID)
+        public void RemoveObject(UUID uuid, UUID regionUUID)
         {
-//            m_log.InfoFormat("[REGION DB]: Removing obj: {0} from region: {1}", obj.Guid, regionUUID);
-
-            DataTable prims = ds.Tables["prims"];
-            DataTable shapes = ds.Tables["primshapes"];
-
-            string selectExp = "SceneGroupID = '" + obj + "' and RegionUUID = '" + regionUUID + "'";
-            lock (ds)
+            var primsInObject = m_primsCollection.Find(p => p.SceneGroupID == uuid && p.RegionUUID == regionUUID).ToList();
+            foreach (var primDoc in primsInObject)
             {
-                DataRow[] primRows = prims.Select(selectExp);
-                foreach (DataRow row in primRows)
-                {
-                    // Remove shape rows
-                    UUID uuid = new UUID((string)row["UUID"]);
-                    DataRow shapeRow = shapes.Rows.Find(uuid.ToString());
-                    if (shapeRow != null)
-                    {
-                        shapeRow.Delete();
-                    }
-
-                    RemoveItems(uuid);
-
-                    // Remove prim row
-                    row.Delete();
-                }
-                Commit();
+                m_shapesCollection.DeleteOne(s => s.UUID == primDoc.UUID);
+                m_itemsCollection.DeleteMany(i => i.primID == primDoc.UUID);
             }
+            m_primsCollection.DeleteMany(p => p.SceneGroupID == uuid && p.RegionUUID == regionUUID);
         }
 
-        /// <summary>
-        /// Remove all persisted items of the given prim.
-        /// The caller must acquire the necessrary synchronization locks and commit or rollback changes.
-        /// </summary>
-        /// <param name="uuid">The item UUID</param>
-        private void RemoveItems(UUID uuid)
+        public void StorePrimInventory(UUID primID, ICollection<TaskInventoryItem> items)
         {
-            DataTable items = ds.Tables["primitems"];
+            m_itemsCollection.DeleteMany(i => i.primID == primID);
 
-            String sql = String.Format("primID = '{0}'", uuid);
-            DataRow[] itemRows = items.Select(sql);
-
-            foreach (DataRow itemRow in itemRows)
+            if (items != null && items.Count > 0)
             {
-                itemRow.Delete();
+                var itemDocs = new List<ItemDocument>();
+                foreach (var item in items)
+                {
+                    itemDocs.Add(ConvertToItemDocument(item));
+                }
+                m_itemsCollection.InsertMany(itemDocs);
             }
         }
 
-        /// <summary>
-        /// Load persisted objects from region storage.
-        /// </summary>
-        /// <param name="regionUUID">The region UUID</param>
-        /// <returns>List of loaded groups</returns>
         public List<SceneObjectGroup> LoadObjects(UUID regionUUID)
         {
-            Dictionary<UUID, SceneObjectGroup> createdObjects = new Dictionary<UUID, SceneObjectGroup>();
+            var prims = m_primsCollection.Find(p => p.RegionUUID == regionUUID).ToList();
+            if (prims.Count == 0)
+                return new List<SceneObjectGroup>();
 
-            List<SceneObjectGroup> retvals = new List<SceneObjectGroup>();
+            var primIds = new List<Guid>();
+            foreach(var p in prims)
+                primIds.Add(p.UUID);
 
-            DataTable prims = ds.Tables["prims"];
-            DataTable shapes = ds.Tables["primshapes"];
+            var shapes = m_shapesCollection.Find(s => primIds.Contains(s.UUID)).ToList().ToDictionary(s => s.UUID);
+            var items = m_itemsCollection.Find(i => primIds.Contains(i.primID)).ToList();
 
-            string byRegion = "RegionUUID = '" + regionUUID + "'";
+            var objects = new Dictionary<Guid, SceneObjectGroup>();
+            var primsToSOG = new Dictionary<Guid, SceneObjectGroup>();
 
-            lock (ds)
+            foreach (var primDoc in prims)
             {
-                DataRow[] primsForRegion = prims.Select(byRegion);
-//                m_log.Info("[MongoDB REGION DB]: Loaded " + primsForRegion.Length + " prims for region: " + regionUUID);
-
-                // First, create all groups
-                foreach (DataRow primRow in primsForRegion)
+                SceneObjectPart part = ConvertFromPrimDocument(primDoc);
+                
+                if (shapes.TryGetValue(primDoc.UUID, out var shapeDoc))
                 {
-                    try
-                    {
-                        SceneObjectPart prim = null;
-
-                        string uuid = (string)primRow["UUID"];
-                        string objID = (string)primRow["SceneGroupID"];
-
-                        if (uuid == objID) //is new SceneObjectGroup ?
-                        {
-                            prim = buildPrim(primRow);
-                            DataRow shapeRow = shapes.Rows.Find(prim.UUID.ToString());
-                            if (shapeRow != null)
-                            {
-                                prim.Shape = buildShape(shapeRow);
-                            }
-                            else
-                            {
-                                m_log.Warn(
-                                    "[MongoDB REGION DB]: No shape found for prim in storage, so setting default box shape");
-                                prim.Shape = PrimitiveBaseShape.Default;
-                            }
-
-                            SceneObjectGroup group = new SceneObjectGroup(prim);
-
-                            if (primRow["lnkstBinData"] is not DBNull)
-                            {
-                                byte[] data = (byte[])primRow["lnkstBinData"];
-                                group.LinksetData = LinksetData.FromBin(data);
-                            }
-                            if(primRow["StartStr"] is not  DBNull)
-                            {
-                                group.RezStringParameter = (string)primRow["StartStr"];
-                            }
-                            createdObjects.Add(group.UUID, group);
-                            retvals.Add(group);
-                            LoadItems(prim);
-
-
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.Error("[MongoDB REGION DB]: Failed create prim object in new group, exception and data follows");
-                        m_log.Error("[MongoDB REGION DB]: ", e);
-                        foreach (DataColumn col in prims.Columns)
-                        {
-                            m_log.Error("[MongoDB REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
-                        }
-                    }
+                    part.Shape = ConvertFromShapeDocument(shapeDoc);
+                }
+                else
+                {
+                    m_log.Warn($"[MONGODB SIMULATION]: Missing shape for prim {primDoc.UUID}");
+                    part.Shape = new PrimitiveBaseShape();
                 }
 
-                // Now fill the groups with part data
-                foreach (DataRow primRow in primsForRegion)
+                if (objects.TryGetValue(primDoc.SceneGroupID, out var sog))
                 {
-                    try
+                    sog.AddPart(part);
+                }
+                else
+                {
+                    sog = new SceneObjectGroup(part);
+                    objects.Add(primDoc.SceneGroupID, sog);
+                }
+                primsToSOG.Add(part.UUID, sog);
+            }
+            
+            foreach (var itemDoc in items)
+            {
+                if (primsToSOG.TryGetValue(itemDoc.primID, out var sog))
+                {
+                    var part = sog.GetPart(itemDoc.primID);
+                    if (part != null)
                     {
-                        SceneObjectPart prim = null;
-
-                        string uuid = (string)primRow["UUID"];
-                        string objID = (string)primRow["SceneGroupID"];
-                        if (uuid != objID) //is new SceneObjectGroup ?
-                        {
-                            prim = buildPrim(primRow);
-                            DataRow shapeRow = shapes.Rows.Find(prim.UUID.ToString());
-                            if (shapeRow != null)
-                            {
-                                prim.Shape = buildShape(shapeRow);
-                            }
-                            else
-                            {
-                                m_log.Warn(
-                                    "[MongoDB REGION DB]: No shape found for prim in storage, so setting default box shape");
-                                prim.Shape = PrimitiveBaseShape.Default;
-                            }
-
-                            createdObjects[new UUID(objID)].AddPart(prim);
-                            LoadItems(prim);
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.Error("[MongoDB REGION DB]: Failed create prim object in group, exception and data follows");
-                        m_log.Error("[MongoDB REGION DB]: ", e);
-                        foreach (DataColumn col in prims.Columns)
-                        {
-                            m_log.Error("[MongoDB REGION DB]: Col: " + col.ColumnName + " => " + primRow[col]);
-                        }
+                        part.Inventory.RestoreItem(ConvertFromItemDocument(itemDoc));
                     }
                 }
             }
-            return retvals;
+
+            return new List<SceneObjectGroup>(objects.Values);
         }
 
-        /// <summary>
-        /// Load in a prim's persisted inventory.
-        /// </summary>
-        /// <param name="prim">the prim</param>
-        private void LoadItems(SceneObjectPart prim)
+        public void StoreTerrain(TerrainData terrain, UUID regionID)
         {
-//            m_log.DebugFormat("[MongoDB REGION DB]: Loading inventory for {0} {1}", prim.Name, prim.UUID);
-
-            DataTable dbItems = ds.Tables["primitems"];
-            String sql = String.Format("primID = '{0}'", prim.UUID.ToString());
-            DataRow[] dbItemRows = dbItems.Select(sql);
-            IList<TaskInventoryItem> inventory = new List<TaskInventoryItem>();
-
-//            m_log.DebugFormat("[MongoDB REGION DB]: Found {0} items for {1} {2}", dbItemRows.Length, prim.Name, prim.UUID);
-
-            foreach (DataRow row in dbItemRows)
+            var doc = new TerrainDocument
             {
-                TaskInventoryItem item = buildItem(row);
-                inventory.Add(item);
-
-//                m_log.DebugFormat("[MongoDB REGION DB]: Restored item {0} {1}", item.Name, item.ItemID);
-            }
-
-            prim.Inventory.RestoreInventoryItems(inventory);
+                RegionUUID = regionID,
+                Revision = terrain.Revision,
+                Heightfield = terrain.GetRawTerrain()
+            };
+            m_terrainCollection.ReplaceOne(t => t.RegionUUID == regionID, doc, new ReplaceOptions { IsUpsert = true });
         }
 
-        // Legacy entry point for when terrain was always a 256x256 hieghtmap
-        public void StoreTerrain(double[,] ter, UUID regionID)
+        public void StoreBakedTerrain(TerrainData terrain, UUID regionID)
         {
-            StoreTerrain(new TerrainData(ter), regionID);
-        }
-
-        /// <summary>
-        /// Store a terrain in region storage
-        /// </summary>
-        /// <param name="ter">terrain heightfield</param>
-        /// <param name="regionID">region UUID</param>
-        public void StoreTerrain(TerrainData terrData, UUID regionID)
-        {
-            lock (ds)
+             var doc = new BakedTerrainDocument
             {
-                using (MongoDBCommand cmd = new MongoDBCommand("delete from terrain where RegionUUID=:RegionUUID", m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-                    cmd.ExecuteNonQuery();
-                }
-
-                // the following is an work around for .NET.  The perf
-                // issues associated with it aren't as bad as you think.
-                String sql = "insert into terrain(RegionUUID, Revision, Heightfield)" +
-                             " values(:RegionUUID, :Revision, :Heightfield)";
-
-                int terrainDBRevision;
-                Array terrainDBblob;
-                terrData.GetDatabaseBlob(out terrainDBRevision, out terrainDBblob);
-
-                m_log.DebugFormat("{0} Storing terrain format {1}", LogHeader, terrainDBRevision);
-
-                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-                    cmd.Parameters.Add(new MongoDBParameter(":Revision", terrainDBRevision));
-                    cmd.Parameters.Add(new MongoDBParameter(":Heightfield", terrainDBblob));
-                    cmd.ExecuteNonQuery();
-                }
-            }
+                RegionUUID = regionID,
+                Revision = terrain.Revision,
+                Heightfield = terrain.GetRawTerrain()
+            };
+            m_bakedTerrainCollection.ReplaceOne(t => t.RegionUUID == regionID, doc, new ReplaceOptions { IsUpsert = true });
         }
 
-        /// <summary>
-        /// Store baked terrain in region storage
-        /// </summary>
-        /// <param name="ter">terrain heightfield</param>
-        /// <param name="regionID">region UUID</param>
-        public void StoreBakedTerrain(TerrainData terrData, UUID regionID)
+        public void StoreTerrain(double[,] terrain, UUID regionID)
         {
-            lock (ds)
-            {
-                using (
-                    MongoDBCommand cmd = new MongoDBCommand("delete from bakedterrain where RegionUUID=:RegionUUID", m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-                    cmd.ExecuteNonQuery();
-                }
-
-                // the following is an work around for .NET.  The perf
-                // issues associated with it aren't as bad as you think.
-                String sql = "insert into bakedterrain(RegionUUID, Revision, Heightfield)" +
-                             " values(:RegionUUID, :Revision, :Heightfield)";
-
-                int terrainDBRevision;
-                Array terrainDBblob;
-                terrData.GetDatabaseBlob(out terrainDBRevision, out terrainDBblob);
-
-                m_log.DebugFormat("{0} Storing bakedterrain format {1}", LogHeader, terrainDBRevision);
-
-                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-                    cmd.Parameters.Add(new MongoDBParameter(":Revision", terrainDBRevision));
-                    cmd.Parameters.Add(new MongoDBParameter(":Heightfield", terrainDBblob));
-                    cmd.ExecuteNonQuery();
-                }
-            }
+            var tdata = new TerrainData(terrain);
+            StoreTerrain(tdata, regionID);
         }
 
-        /// <summary>
-        /// Load the latest terrain revision from region storage
-        /// </summary>
-        /// <param name="regionID">the region UUID</param>
-        /// <returns>Heightfield data</returns>
-        public double[,] LoadTerrain(UUID regionID)
-        {
-            double[,] ret = null;
-            TerrainData terrData = LoadTerrain(regionID, (int)Constants.RegionSize, (int)Constants.RegionSize, (int)Constants.RegionHeight);
-            if (terrData != null)
-                ret = terrData.GetDoubles();
-            return ret;
-        }
-
-        // Returns 'null' if region not found
         public TerrainData LoadTerrain(UUID regionID, int pSizeX, int pSizeY, int pSizeZ)
         {
-            TerrainData terrData = null;
-
-            lock (ds)
+            var doc = m_terrainCollection.Find(t => t.RegionUUID == regionID).FirstOrDefault();
+            if (doc != null)
             {
-                String sql = "select RegionUUID, Revision, Heightfield from terrain" +
-                             " where RegionUUID=:RegionUUID order by Revision desc";
-
-                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-
-                    using (IDataReader row = cmd.ExecuteReader())
-                    {
-                        int rev = 0;
-                        if (row.Read())
-                        {
-                            rev = Convert.ToInt32(row["Revision"]);
-                            byte[] blob = (byte[])row["Heightfield"];
-                            terrData = TerrainData.CreateFromDatabaseBlobFactory(pSizeX, pSizeY, pSizeZ, rev, blob);
-                        }
-                        else
-                        {
-                            m_log.Warn("[MongoDB REGION DB]: No terrain found for region");
-                            return null;
-                        }
-
-                        m_log.Debug("[MongoDB REGION DB]: Loaded terrain revision r" + rev.ToString());
-                    }
-                }
+                var tdata = new TerrainData(pSizeX, pSizeY, pSizeZ, doc.Heightfield);
+                tdata.Revision = doc.Revision;
+                return tdata;
             }
-            return terrData;
+            return null;
         }
-
+        
         public TerrainData LoadBakedTerrain(UUID regionID, int pSizeX, int pSizeY, int pSizeZ)
         {
-            TerrainData terrData = null;
-
-            lock (ds)
+            var doc = m_bakedTerrainCollection.Find(t => t.RegionUUID == regionID).FirstOrDefault();
+            if (doc != null)
             {
-                String sql = "select RegionUUID, Revision, Heightfield from bakedterrain" +
-                             " where RegionUUID=:RegionUUID";
-
-                using (MongoDBCommand cmd = new MongoDBCommand(sql, m_conn))
-                {
-                    cmd.Parameters.Add(new MongoDBParameter(":RegionUUID", regionID.ToString()));
-
-                    using (IDataReader row = cmd.ExecuteReader())
-                    {
-                        int rev = 0;
-                        if (row.Read())
-                        {
-                            rev = Convert.ToInt32(row["Revision"]);
-                            byte[] blob = (byte[])row["Heightfield"];
-                            terrData = TerrainData.CreateFromDatabaseBlobFactory(pSizeX, pSizeY, pSizeZ, rev, blob);
-                        }
-                    }
-                }
+                var tdata = new TerrainData(pSizeX, pSizeY, pSizeZ, doc.Heightfield);
+                tdata.Revision = doc.Revision;
+                return tdata;
             }
-            return terrData;
+            return null;
+        }
+
+        public double[,] LoadTerrain(UUID regionID)
+        {
+            var tdata = LoadTerrain(regionID, (int)Constants.RegionSize, (int)Constants.RegionSize, (int)Constants.MaxRegionSize);
+            return tdata?.GetDoubles();
+        }
+
+        public void StoreLandObject(ILandObject parcel)
+        {
+            var landDoc = ConvertToLandDocument(parcel.LandData, parcel.RegionUUID);
+            m_landCollection.ReplaceOne(l => l.UUID == landDoc.UUID, landDoc, new ReplaceOptions { IsUpsert = true });
+
+            m_landAccessListCollection.DeleteMany(la => la.LandUUID == parcel.LandData.GlobalID);
+            if (parcel.LandData.ParcelAccessList.Count > 0)
+            {
+                var accessDocs = new List<LandAccessDocument>();
+                foreach (var entry in parcel.LandData.ParcelAccessList)
+                {
+                    accessDocs.Add(ConvertToLandAccessDocument(entry, parcel.LandData.GlobalID));
+                }
+                m_landAccessListCollection.InsertMany(accessDocs);
+            }
         }
 
         public void RemoveLandObject(UUID globalID)
         {
-            lock (ds)
-            {
-                // Can't use blanket SQL statements when using SqlAdapters unless you re-read the data into the adapter
-                // after you're done.
-                // replaced below code with the MongoDBAdapter version.
-                //using (MongoDBCommand cmd = new MongoDBCommand("delete from land where UUID=:UUID", m_conn))
-                //{
-                //    cmd.Parameters.Add(new MongoDBParameter(":UUID", globalID.ToString()));
-                //    cmd.ExecuteNonQuery();
-                //}
-
-                //using (MongoDBCommand cmd = new MongoDBCommand("delete from landaccesslist where LandUUID=:UUID", m_conn))
-                //{
-                //   cmd.Parameters.Add(new MongoDBParameter(":UUID", globalID.ToString()));
-                //    cmd.ExecuteNonQuery();
-                //}
-
-                DataTable land = ds.Tables["land"];
-                DataTable landaccesslist = ds.Tables["landaccesslist"];
-                DataRow landRow = land.Rows.Find(globalID.ToString());
-                if (landRow != null)
-                {
-                    landRow.Delete();
-                }
-                List<DataRow> rowsToDelete = new List<DataRow>();
-                foreach (DataRow rowToCheck in landaccesslist.Rows)
-                {
-                    if (rowToCheck["LandUUID"].ToString() == globalID.ToString())
-                        rowsToDelete.Add(rowToCheck);
-                }
-                for (int iter = 0; iter < rowsToDelete.Count; iter++)
-                {
-                    rowsToDelete[iter].Delete();
-                }
-                Commit();
-            }
+            m_landCollection.DeleteOne(l => l.UUID == globalID.Guid);
+            m_landAccessListCollection.DeleteMany(la => la.LandUUID == globalID.Guid);
         }
 
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="parcel"></param>
-        public void StoreLandObject(ILandObject parcel)
-        {
-            lock (ds)
-            {
-                DataTable land = ds.Tables["land"];
-                DataTable landaccesslist = ds.Tables["landaccesslist"];
-
-                DataRow landRow = land.Rows.Find(parcel.LandData.GlobalID.ToString());
-                if (landRow == null)
-                {
-                    landRow = land.NewRow();
-                    fillLandRow(landRow, parcel.LandData, parcel.RegionUUID);
-                    land.Rows.Add(landRow);
-                }
-                else
-                {
-                    fillLandRow(landRow, parcel.LandData, parcel.RegionUUID);
-                }
-
-                // I know this caused someone issues before, but OpenSim is unusable if we leave this stuff around
-                //using (MongoDBCommand cmd = new MongoDBCommand("delete from landaccesslist where LandUUID=:LandUUID", m_conn))
-                //{
-                //    cmd.Parameters.Add(new MongoDBParameter(":LandUUID", parcel.LandData.GlobalID.ToString()));
-                //    cmd.ExecuteNonQuery();
-
-                //                }
-
-                // This is the slower..  but more appropriate thing to do
-
-                // We can't modify the table with direct queries before calling Commit() and re-filling them.
-                List<DataRow> rowsToDelete = new List<DataRow>();
-                foreach (DataRow rowToCheck in landaccesslist.Rows)
-                {
-                    if (rowToCheck["LandUUID"].ToString() == parcel.LandData.GlobalID.ToString())
-                        rowsToDelete.Add(rowToCheck);
-                }
-                for (int iter = 0; iter < rowsToDelete.Count; ++iter)
-                    rowsToDelete[iter].Delete();
-
-                foreach (LandAccessEntry entry in parcel.LandData.ParcelAccessList)
-                {
-                    DataRow newAccessRow = landaccesslist.NewRow();
-                    fillLandAccessRow(newAccessRow, entry, parcel.LandData.GlobalID);
-                    landaccesslist.Rows.Add(newAccessRow);
-                }
-                Commit();
-            }
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="regionUUID"></param>
-        /// <returns></returns>
         public List<LandData> LoadLandObjects(UUID regionUUID)
         {
-            List<LandData> landDataForRegion = new List<LandData>();
-            lock (ds)
+            var landDocs = m_landCollection.Find(l => l.RegionUUID == regionUUID.Guid).ToList();
+            var landDataList = new List<LandData>();
+
+            foreach (var landDoc in landDocs)
             {
-                DataTable land = ds.Tables["land"];
-                DataTable landaccesslist = ds.Tables["landaccesslist"];
-                string searchExp = "RegionUUID = '" + regionUUID + "'";
-                DataRow[] rawDataForRegion = land.Select(searchExp);
-                foreach (DataRow rawDataLand in rawDataForRegion)
+                var landData = ConvertFromLandDocument(landDoc);
+                var accessDocs = m_landAccessListCollection.Find(la => la.LandUUID == landData.GlobalID.Guid).ToList();
+                foreach (var accessDoc in accessDocs)
                 {
-                    LandData newLand = buildLandData(rawDataLand);
-                    string accessListSearchExp = "LandUUID = '" + newLand.GlobalID + "'";
-                    DataRow[] rawDataForLandAccessList = landaccesslist.Select(accessListSearchExp);
-                    foreach (DataRow rawDataLandAccess in rawDataForLandAccessList)
-                    {
-                        newLand.ParcelAccessList.Add(buildLandAccessData(rawDataLandAccess));
-                    }
-
-                    landDataForRegion.Add(newLand);
+                    landData.ParcelAccessList.Add(ConvertFromLandAccessDocument(accessDoc));
                 }
+                landDataList.Add(landData);
             }
-            return landDataForRegion;
+            return landDataList;
         }
 
-        /// <summary>
-        ///
-        /// </summary>
-        public void Commit()
+        public void StoreRegionSettings(RegionSettings rs)
         {
-//            m_log.Debug("[MongoDB]: Starting commit");
-            //lock (ds) caller must lock
-            {
-                primDa.Update(ds, "prims");
-                shapeDa.Update(ds, "primshapes");
-
-                itemsDa.Update(ds, "primitems");
-
-                terrainDa.Update(ds, "terrain");
-                landDa.Update(ds, "land");
-                landAccessListDa.Update(ds, "landaccesslist");
-                try
-                {
-                    regionSettingsDa.Update(ds, "regionsettings");
-                    regionWindlightDa.Update(ds, "regionwindlight");
-                }
-                catch (MongoDBException SqlEx)
-                {
-                    throw new Exception(
-                        "There was a SQL error or connection string configuration error when saving the region settings.  This could be a bug, it could also happen if ConnectionString is defined in the [DatabaseService] section of StandaloneCommon.ini in the config_include folder.  This could also happen if the config_include folder doesn't exist or if the OpenSim.ini [Architecture] section isn't set.  If this is your first time running OpenSimulator, please restart the simulator and bug a developer to fix this!",
-                        SqlEx);
-                }
-                ds.AcceptChanges();
-            }
+            var doc = ConvertToRegionSettingsDocument(rs);
+            m_regionSettingsCollection.ReplaceOne(r => r.regionUUID == rs.RegionUUID.Guid, doc, new ReplaceOptions { IsUpsert = true });
         }
 
-        /// <summary>
-        /// See <see cref="Commit"/>
-        /// </summary>
-        public void Shutdown()
+        public RegionSettings LoadRegionSettings(UUID regionUUID)
         {
-            lock(ds)
-                Commit();
-        }
-
-        /***********************************************************************
-         *
-         *  Database Definition Functions
-         *
-         *  This should be db agnostic as we define them in ADO.NET terms
-         *
-         **********************************************************************/
-
-        protected void CreateDataSetMapping(IDataAdapter da, string tableName)
-        {
-            ITableMapping dbMapping = da.TableMappings.Add(tableName, tableName);
-            foreach (DataColumn col in ds.Tables[tableName].Columns)
-            {
-                dbMapping.ColumnMappings.Add(col.ColumnName, col.ColumnName);
-            }
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="dt"></param>
-        /// <param name="name"></param>
-        /// <param name="type"></param>
-        private static void createCol(DataTable dt, string name, Type type)
-        {
-            DataColumn col = new DataColumn(name, type);
-            dt.Columns.Add(col);
-        }
-
-        /// <summary>
-        /// Creates the "terrain" table
-        /// </summary>
-        /// <returns>terrain table DataTable</returns>
-        private static DataTable createTerrainTable()
-        {
-            DataTable terrain = new DataTable("terrain");
-
-            createCol(terrain, "RegionUUID", typeof(String));
-            createCol(terrain, "Revision", typeof(Int32));
-            createCol(terrain, "Heightfield", typeof(Byte[]));
-
-            return terrain;
-        }
-
-        /// <summary>
-        /// Creates the "prims" table
-        /// </summary>
-        /// <returns>prim table DataTable</returns>
-        private static DataTable createPrimTable()
-        {
-            DataTable prims = new DataTable("prims");
-
-            createCol(prims, "UUID", typeof(String));
-            createCol(prims, "RegionUUID", typeof(String));
-            createCol(prims, "CreationDate", typeof(Int32));
-            createCol(prims, "Name", typeof(String));
-            createCol(prims, "SceneGroupID", typeof(String));
-            // various text fields
-            createCol(prims, "Text", typeof(String));
-            createCol(prims, "ColorR", typeof(Int32));
-            createCol(prims, "ColorG", typeof(Int32));
-            createCol(prims, "ColorB", typeof(Int32));
-            createCol(prims, "ColorA", typeof(Int32));
-            createCol(prims, "Description", typeof(String));
-            createCol(prims, "SitName", typeof(String));
-            createCol(prims, "TouchName", typeof(String));
-            // permissions
-            createCol(prims, "ObjectFlags", typeof(Int32));
-            createCol(prims, "CreatorID", typeof(String));
-            createCol(prims, "OwnerID", typeof(String));
-            createCol(prims, "GroupID", typeof(String));
-            createCol(prims, "LastOwnerID", typeof(String));
-            createCol(prims, "RezzerID", typeof(String));
-            createCol(prims, "OwnerMask", typeof(Int32));
-            createCol(prims, "NextOwnerMask", typeof(Int32));
-            createCol(prims, "GroupMask", typeof(Int32));
-            createCol(prims, "EveryoneMask", typeof(Int32));
-            createCol(prims, "BaseMask", typeof(Int32));
-            // vectors
-            createCol(prims, "PositionX", typeof(Double));
-            createCol(prims, "PositionY", typeof(Double));
-            createCol(prims, "PositionZ", typeof(Double));
-            createCol(prims, "GroupPositionX", typeof(Double));
-            createCol(prims, "GroupPositionY", typeof(Double));
-            createCol(prims, "GroupPositionZ", typeof(Double));
-            createCol(prims, "VelocityX", typeof(Double));
-            createCol(prims, "VelocityY", typeof(Double));
-            createCol(prims, "VelocityZ", typeof(Double));
-            createCol(prims, "AngularVelocityX", typeof(Double));
-            createCol(prims, "AngularVelocityY", typeof(Double));
-            createCol(prims, "AngularVelocityZ", typeof(Double));
-            createCol(prims, "AccelerationX", typeof(Double));
-            createCol(prims, "AccelerationY", typeof(Double));
-            createCol(prims, "AccelerationZ", typeof(Double));
-            // quaternions
-            createCol(prims, "RotationX", typeof(Double));
-            createCol(prims, "RotationY", typeof(Double));
-            createCol(prims, "RotationZ", typeof(Double));
-            createCol(prims, "RotationW", typeof(Double));
-
-            // sit target
-            createCol(prims, "SitTargetOffsetX", typeof(Double));
-            createCol(prims, "SitTargetOffsetY", typeof(Double));
-            createCol(prims, "SitTargetOffsetZ", typeof(Double));
-
-            createCol(prims, "SitTargetOrientW", typeof(Double));
-            createCol(prims, "SitTargetOrientX", typeof(Double));
-            createCol(prims, "SitTargetOrientY", typeof(Double));
-            createCol(prims, "SitTargetOrientZ", typeof(Double));
-
-            createCol(prims, "PayPrice", typeof(Int32));
-            createCol(prims, "PayButton1", typeof(Int32));
-            createCol(prims, "PayButton2", typeof(Int32));
-            createCol(prims, "PayButton3", typeof(Int32));
-            createCol(prims, "PayButton4", typeof(Int32));
-
-            createCol(prims, "LoopedSound", typeof(String));
-            createCol(prims, "LoopedSoundGain", typeof(Double));
-            createCol(prims, "TextureAnimation", typeof(String));
-            createCol(prims, "ParticleSystem", typeof(String));
-
-            createCol(prims, "CameraEyeOffsetX", typeof(Double));
-            createCol(prims, "CameraEyeOffsetY", typeof(Double));
-            createCol(prims, "CameraEyeOffsetZ", typeof(Double));
-
-            createCol(prims, "CameraAtOffsetX", typeof(Double));
-            createCol(prims, "CameraAtOffsetY", typeof(Double));
-            createCol(prims, "CameraAtOffsetZ", typeof(Double));
-
-            createCol(prims, "ForceMouselook", typeof(Int16));
-
-            createCol(prims, "ScriptAccessPin", typeof(Int32));
-
-            createCol(prims, "AllowedDrop", typeof(Int16));
-            createCol(prims, "DieAtEdge", typeof(Int16));
-
-            createCol(prims, "SalePrice", typeof(Int32));
-            createCol(prims, "SaleType", typeof(Int16));
-
-            // click action
-            createCol(prims, "ClickAction", typeof(Byte));
-
-            createCol(prims, "Material", typeof(Byte));
-
-            createCol(prims, "CollisionSound", typeof(String));
-            createCol(prims, "CollisionSoundVolume", typeof(Double));
-
-            createCol(prims, "VolumeDetect", typeof(Int16));
-
-            createCol(prims, "MediaURL", typeof(String));
-
-            createCol(prims, "AttachedPosX", typeof(Double));
-            createCol(prims, "AttachedPosY", typeof(Double));
-            createCol(prims, "AttachedPosZ", typeof(Double));
-
-            createCol(prims, "DynAttrs", typeof(String));
-
-            createCol(prims, "PhysicsShapeType", typeof(Byte));
-            createCol(prims, "Density", typeof(Double));
-            createCol(prims, "GravityModifier", typeof(Double));
-            createCol(prims, "Friction", typeof(Double));
-            createCol(prims, "Restitution", typeof(Double));
-
-            createCol(prims, "KeyframeMotion", typeof(Byte[]));
-
-            createCol(prims, "PassTouches", typeof(bool));
-            createCol(prims, "PassCollisions", typeof(bool));
-            createCol(prims, "Vehicle", typeof(string));
-
-            createCol(prims, "RotationAxisLocks", typeof(byte));
-
-            createCol(prims, "PhysInertia", typeof(string));
-
-            createCol(prims, "standtargetx", typeof(float));
-            createCol(prims, "standtargety", typeof(float));
-            createCol(prims, "standtargetz", typeof(float));
-            createCol(prims, "sitactrange", typeof(float));
-
-            createCol(prims, "pseudocrc", typeof(int));
-            createCol(prims, "sopanims", typeof(byte[]));
-
-            createCol(prims, "lnkstBinData", typeof(byte[]));
-            createCol(prims, "StartStr", typeof(string));
-
-            // Add in contraints
-            prims.PrimaryKey = new DataColumn[] { prims.Columns["UUID"] };
-
-            return prims;
-        }
-
-        /// <summary>
-        /// Creates "primshapes" table
-        /// </summary>
-        /// <returns>shape table DataTable</returns>
-        private static DataTable createShapeTable()
-        {
-            DataTable shapes = new DataTable("primshapes");
-            createCol(shapes, "UUID", typeof(String));
-            // shape is an enum
-            createCol(shapes, "Shape", typeof(Int32));
-            // vectors
-            createCol(shapes, "ScaleX", typeof(Double));
-            createCol(shapes, "ScaleY", typeof(Double));
-            createCol(shapes, "ScaleZ", typeof(Double));
-            // paths
-            createCol(shapes, "PCode", typeof(Int32));
-            createCol(shapes, "PathBegin", typeof(Int32));
-            createCol(shapes, "PathEnd", typeof(Int32));
-            createCol(shapes, "PathScaleX", typeof(Int32));
-            createCol(shapes, "PathScaleY", typeof(Int32));
-            createCol(shapes, "PathShearX", typeof(Int32));
-            createCol(shapes, "PathShearY", typeof(Int32));
-            createCol(shapes, "PathSkew", typeof(Int32));
-            createCol(shapes, "PathCurve", typeof(Int32));
-            createCol(shapes, "PathRadiusOffset", typeof(Int32));
-            createCol(shapes, "PathRevolutions", typeof(Int32));
-            createCol(shapes, "PathTaperX", typeof(Int32));
-            createCol(shapes, "PathTaperY", typeof(Int32));
-            createCol(shapes, "PathTwist", typeof(Int32));
-            createCol(shapes, "PathTwistBegin", typeof(Int32));
-            // profile
-            createCol(shapes, "ProfileBegin", typeof(Int32));
-            createCol(shapes, "ProfileEnd", typeof(Int32));
-            createCol(shapes, "ProfileCurve", typeof(Int32));
-            createCol(shapes, "ProfileHollow", typeof(Int32));
-            createCol(shapes, "State", typeof(Int32));
-            createCol(shapes, "LastAttachPoint", typeof(Int32));
-            // text TODO: this isn't right, but I'm not sure the right
-            // way to specify this as a blob atm
-            createCol(shapes, "Texture", typeof(Byte[]));
-            createCol(shapes, "ExtraParams", typeof(Byte[]));
-            createCol(shapes, "Media", typeof(String));
-            createCol(shapes, "MatOvrd", typeof(byte[]));
-            shapes.PrimaryKey = new DataColumn[] { shapes.Columns["UUID"] };
-
-            return shapes;
-        }
-
-        /// <summary>
-        /// creates "primitems" table
-        /// </summary>
-        /// <returns>item table DataTable</returns>
-        private static DataTable createItemsTable()
-        {
-            DataTable items = new DataTable("primitems");
-
-            createCol(items, "itemID", typeof(String));
-            createCol(items, "primID", typeof(String));
-            createCol(items, "assetID", typeof(String));
-            createCol(items, "parentFolderID", typeof(String));
-
-            createCol(items, "invType", typeof(Int32));
-            createCol(items, "assetType", typeof(Int32));
-
-            createCol(items, "name", typeof(String));
-            createCol(items, "description", typeof(String));
-
-            createCol(items, "creationDate", typeof(Int64));
-            createCol(items, "creatorID", typeof(String));
-            createCol(items, "ownerID", typeof(String));
-            createCol(items, "lastOwnerID", typeof(String));
-            createCol(items, "groupID", typeof(String));
-
-            createCol(items, "nextPermissions", typeof(UInt32));
-            createCol(items, "currentPermissions", typeof(UInt32));
-            createCol(items, "basePermissions", typeof(UInt32));
-            createCol(items, "everyonePermissions", typeof(UInt32));
-            createCol(items, "groupPermissions", typeof(UInt32));
-            createCol(items, "flags", typeof(UInt32));
-
-            items.PrimaryKey = new DataColumn[] { items.Columns["itemID"] };
-
-            return items;
-        }
-
-        /// <summary>
-        /// Creates "land" table
-        /// </summary>
-        /// <returns>land table DataTable</returns>
-        private static DataTable createLandTable()
-        {
-            DataTable land = new DataTable("land");
-            createCol(land, "UUID", typeof(String));
-            createCol(land, "RegionUUID", typeof(String));
-            createCol(land, "LocalLandID", typeof(UInt32));
-
-            // Bitmap is a byte[512]
-            createCol(land, "Bitmap", typeof(Byte[]));
-
-            createCol(land, "Name", typeof(String));
-            createCol(land, "Desc", typeof(String));
-            createCol(land, "OwnerUUID", typeof(String));
-            createCol(land, "IsGroupOwned", typeof(string));
-            createCol(land, "Area", typeof(Int32));
-            createCol(land, "AuctionID", typeof(Int32)); //Unemplemented
-            createCol(land, "Category", typeof(Int32)); //Enum OpenMetaverse.Parcel.ParcelCategory
-            createCol(land, "ClaimDate", typeof(Int32));
-            createCol(land, "ClaimPrice", typeof(Int32));
-            createCol(land, "GroupUUID", typeof(string));
-            createCol(land, "SalePrice", typeof(Int32));
-            createCol(land, "LandStatus", typeof(Int32)); //Enum. OpenMetaverse.Parcel.ParcelStatus
-            createCol(land, "LandFlags", typeof(UInt32));
-            createCol(land, "LandingType", typeof(Byte));
-            createCol(land, "MediaAutoScale", typeof(Byte));
-            createCol(land, "MediaTextureUUID", typeof(String));
-            createCol(land, "MediaURL", typeof(String));
-            createCol(land, "MusicURL", typeof(String));
-            createCol(land, "PassHours", typeof(Double));
-            createCol(land, "PassPrice", typeof(UInt32));
-            createCol(land, "SnapshotUUID", typeof(String));
-            createCol(land, "UserLocationX", typeof(Double));
-            createCol(land, "UserLocationY", typeof(Double));
-            createCol(land, "UserLocationZ", typeof(Double));
-            createCol(land, "UserLookAtX", typeof(Double));
-            createCol(land, "UserLookAtY", typeof(Double));
-            createCol(land, "UserLookAtZ", typeof(Double));
-            createCol(land, "AuthbuyerID", typeof(String));
-            createCol(land, "OtherCleanTime", typeof(Int32));
-            createCol(land, "Dwell", typeof(Int32));
-            createCol(land, "MediaType", typeof(String));
-            createCol(land, "MediaDescription", typeof(String));
-            createCol(land, "MediaSize", typeof(String));
-            createCol(land, "MediaLoop", typeof(Boolean));
-            createCol(land, "ObscureMedia", typeof(Boolean));
-            createCol(land, "ObscureMusic", typeof(Boolean));
-            createCol(land, "SeeAVs", typeof(Boolean));
-            createCol(land, "AnyAVSounds", typeof(Boolean));
-            createCol(land, "GroupAVSounds", typeof(Boolean));
-            createCol(land, "environment", typeof(string));
-
-            land.PrimaryKey = new DataColumn[] { land.Columns["UUID"] };
-
-            return land;
-        }
-
-        /// <summary>
-        /// create "landaccesslist" table
-        /// </summary>
-        /// <returns>Landacceslist DataTable</returns>
-        private static DataTable createLandAccessListTable()
-        {
-            DataTable landaccess = new DataTable("landaccesslist");
-            createCol(landaccess, "LandUUID", typeof(String));
-            createCol(landaccess, "AccessUUID", typeof(String));
-            createCol(landaccess, "Flags", typeof(UInt32));
-
-            return landaccess;
-        }
-
-        private static DataTable createRegionSettingsTable()
-        {
-            DataTable regionsettings = new DataTable("regionsettings");
-            createCol(regionsettings, "regionUUID", typeof(String));
-            createCol(regionsettings, "block_terraform", typeof(Int32));
-            createCol(regionsettings, "block_fly", typeof(Int32));
-            createCol(regionsettings, "allow_damage", typeof(Int32));
-            createCol(regionsettings, "restrict_pushing", typeof(Int32));
-            createCol(regionsettings, "allow_land_resell", typeof(Int32));
-            createCol(regionsettings, "allow_land_join_divide", typeof(Int32));
-            createCol(regionsettings, "block_show_in_search", typeof(Int32));
-            createCol(regionsettings, "agent_limit", typeof(Int32));
-            createCol(regionsettings, "object_bonus", typeof(Double));
-            createCol(regionsettings, "maturity", typeof(Int32));
-            createCol(regionsettings, "disable_scripts", typeof(Int32));
-            createCol(regionsettings, "disable_collisions", typeof(Int32));
-            createCol(regionsettings, "disable_physics", typeof(Int32));
-            createCol(regionsettings, "terrain_texture_1", typeof(String));
-            createCol(regionsettings, "terrain_texture_2", typeof(String));
-            createCol(regionsettings, "terrain_texture_3", typeof(String));
-            createCol(regionsettings, "terrain_texture_4", typeof(String));
-            createCol(regionsettings, "TerrainPBR1", typeof(String));
-            createCol(regionsettings, "TerrainPBR2", typeof(String));
-            createCol(regionsettings, "TerrainPBR3", typeof(String));
-            createCol(regionsettings, "TerrainPBR4", typeof(String));
-            createCol(regionsettings, "elevation_1_nw", typeof(Double));
-            createCol(regionsettings, "elevation_2_nw", typeof(Double));
-            createCol(regionsettings, "elevation_1_ne", typeof(Double));
-            createCol(regionsettings, "elevation_2_ne", typeof(Double));
-            createCol(regionsettings, "elevation_1_se", typeof(Double));
-            createCol(regionsettings, "elevation_2_se", typeof(Double));
-            createCol(regionsettings, "elevation_1_sw", typeof(Double));
-            createCol(regionsettings, "elevation_2_sw", typeof(Double));
-            createCol(regionsettings, "water_height", typeof(Double));
-            createCol(regionsettings, "terrain_raise_limit", typeof(Double));
-            createCol(regionsettings, "terrain_lower_limit", typeof(Double));
-            createCol(regionsettings, "use_estate_sun", typeof(Int32));
-            createCol(regionsettings, "sandbox", typeof(Int32));
-            createCol(regionsettings, "sunvectorx", typeof(Double));
-            createCol(regionsettings, "sunvectory", typeof(Double));
-            createCol(regionsettings, "sunvectorz", typeof(Double));
-            createCol(regionsettings, "fixed_sun", typeof(Int32));
-            createCol(regionsettings, "sun_position", typeof(Double));
-            createCol(regionsettings, "covenant", typeof(String));
-            createCol(regionsettings, "covenant_datetime", typeof(Int32));
-            createCol(regionsettings, "map_tile_ID", typeof(String));
-            createCol(regionsettings, "TelehubObject", typeof(String));
-            createCol(regionsettings, "parcel_tile_ID", typeof(String));
-            createCol(regionsettings, "block_search", typeof(Boolean));
-            createCol(regionsettings, "casino", typeof(Boolean));
-            createCol(regionsettings, "cacheID", typeof(string));
-            regionsettings.PrimaryKey = new DataColumn[] { regionsettings.Columns["regionUUID"] };
-            return regionsettings;
-        }
-
-        /// <summary>
-        /// create "regionwindlight" table
-        /// </summary>
-        /// <returns>RegionWindlight DataTable</returns>
-        private static DataTable createRegionWindlightTable()
-        {
-            DataTable regionwindlight = new DataTable("regionwindlight");
-            createCol(regionwindlight, "region_id", typeof(String));
-            createCol(regionwindlight, "water_color_r", typeof(Double));
-            createCol(regionwindlight, "water_color_g", typeof(Double));
-            createCol(regionwindlight, "water_color_b", typeof(Double));
-            createCol(regionwindlight, "water_color_i", typeof(Double));
-            createCol(regionwindlight, "water_fog_density_exponent", typeof(Double));
-            createCol(regionwindlight, "underwater_fog_modifier", typeof(Double));
-            createCol(regionwindlight, "reflection_wavelet_scale_1", typeof(Double));
-            createCol(regionwindlight, "reflection_wavelet_scale_2", typeof(Double));
-            createCol(regionwindlight, "reflection_wavelet_scale_3", typeof(Double));
-            createCol(regionwindlight, "fresnel_scale", typeof(Double));
-            createCol(regionwindlight, "fresnel_offset", typeof(Double));
-            createCol(regionwindlight, "refract_scale_above", typeof(Double));
-            createCol(regionwindlight, "refract_scale_below", typeof(Double));
-            createCol(regionwindlight, "blur_multiplier", typeof(Double));
-            createCol(regionwindlight, "big_wave_direction_x", typeof(Double));
-            createCol(regionwindlight, "big_wave_direction_y", typeof(Double));
-            createCol(regionwindlight, "little_wave_direction_x", typeof(Double));
-            createCol(regionwindlight, "little_wave_direction_y", typeof(Double));
-            createCol(regionwindlight, "normal_map_texture", typeof(String));
-            createCol(regionwindlight, "horizon_r", typeof(Double));
-            createCol(regionwindlight, "horizon_g", typeof(Double));
-            createCol(regionwindlight, "horizon_b", typeof(Double));
-            createCol(regionwindlight, "horizon_i", typeof(Double));
-            createCol(regionwindlight, "haze_horizon", typeof(Double));
-            createCol(regionwindlight, "blue_density_r", typeof(Double));
-            createCol(regionwindlight, "blue_density_g", typeof(Double));
-            createCol(regionwindlight, "blue_density_b", typeof(Double));
-            createCol(regionwindlight, "blue_density_i", typeof(Double));
-            createCol(regionwindlight, "haze_density", typeof(Double));
-            createCol(regionwindlight, "density_multiplier", typeof(Double));
-            createCol(regionwindlight, "distance_multiplier", typeof(Double));
-            createCol(regionwindlight, "max_altitude", typeof(Int32));
-            createCol(regionwindlight, "sun_moon_color_r", typeof(Double));
-            createCol(regionwindlight, "sun_moon_color_g", typeof(Double));
-            createCol(regionwindlight, "sun_moon_color_b", typeof(Double));
-            createCol(regionwindlight, "sun_moon_color_i", typeof(Double));
-            createCol(regionwindlight, "sun_moon_position", typeof(Double));
-            createCol(regionwindlight, "ambient_r", typeof(Double));
-            createCol(regionwindlight, "ambient_g", typeof(Double));
-            createCol(regionwindlight, "ambient_b", typeof(Double));
-            createCol(regionwindlight, "ambient_i", typeof(Double));
-            createCol(regionwindlight, "east_angle", typeof(Double));
-            createCol(regionwindlight, "sun_glow_focus", typeof(Double));
-            createCol(regionwindlight, "sun_glow_size", typeof(Double));
-            createCol(regionwindlight, "scene_gamma", typeof(Double));
-            createCol(regionwindlight, "star_brightness", typeof(Double));
-            createCol(regionwindlight, "cloud_color_r", typeof(Double));
-            createCol(regionwindlight, "cloud_color_g", typeof(Double));
-            createCol(regionwindlight, "cloud_color_b", typeof(Double));
-            createCol(regionwindlight, "cloud_color_i", typeof(Double));
-            createCol(regionwindlight, "cloud_x", typeof(Double));
-            createCol(regionwindlight, "cloud_y", typeof(Double));
-            createCol(regionwindlight, "cloud_density", typeof(Double));
-            createCol(regionwindlight, "cloud_coverage", typeof(Double));
-            createCol(regionwindlight, "cloud_scale", typeof(Double));
-            createCol(regionwindlight, "cloud_detail_x", typeof(Double));
-            createCol(regionwindlight, "cloud_detail_y", typeof(Double));
-            createCol(regionwindlight, "cloud_detail_density", typeof(Double));
-            createCol(regionwindlight, "cloud_scroll_x", typeof(Double));
-            createCol(regionwindlight, "cloud_scroll_x_lock", typeof(Int32));
-            createCol(regionwindlight, "cloud_scroll_y", typeof(Double));
-            createCol(regionwindlight, "cloud_scroll_y_lock", typeof(Int32));
-            createCol(regionwindlight, "draw_classic_clouds", typeof(Int32));
-
-            regionwindlight.PrimaryKey = new DataColumn[] { regionwindlight.Columns["region_id"] };
-            return regionwindlight;
-        }
-
-        private static DataTable createRegionEnvironmentTable()
-        {
-            DataTable regionEnvironment = new DataTable("regionenvironment");
-            createCol(regionEnvironment, "region_id", typeof(String));
-            createCol(regionEnvironment, "llsd_settings", typeof(String));
-
-            regionEnvironment.PrimaryKey = new DataColumn[] { regionEnvironment.Columns["region_id"] };
-
-            return regionEnvironment;
-        }
-
-        private static DataTable createRegionSpawnPointsTable()
-        {
-            DataTable spawn_points = new DataTable("spawn_points");
-            createCol(spawn_points, "regionID", typeof(String));
-            createCol(spawn_points, "Yaw", typeof(float));
-            createCol(spawn_points, "Pitch", typeof(float));
-            createCol(spawn_points, "Distance", typeof(float));
-
-            return spawn_points;
-        }
-
-        /***********************************************************************
-         *
-         *  Convert between ADO.NET <=> OpenSim Objects
-         *
-         *  These should be database independant
-         *
-         **********************************************************************/
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private SceneObjectPart buildPrim(DataRow row)
-        {
-            // Code commented.  Uncomment to test the unit test inline.
-
-            // The unit test mentions this commented code for the purposes
-            // of debugging a unit test failure
-
-            // SceneObjectGroup sog = new SceneObjectGroup();
-            // SceneObjectPart sop = new SceneObjectPart();
-            // sop.LocalId = 1;
-            // sop.Name = "object1";
-            // sop.Description = "object1";
-            // sop.Text = "";
-            // sop.SitName = "";
-            // sop.TouchName = "";
-            // sop.UUID = UUID.Random();
-            // sop.Shape = PrimitiveBaseShape.Default;
-            // sog.SetRootPart(sop);
-            // Add breakpoint in above line.  Check sop fields.
-
-            // TODO: this doesn't work yet because something more
-            // interesting has to be done to actually get these values
-            // back out.  Not enough time to figure it out yet.
-
-            SceneObjectPart prim = new SceneObjectPart();
-            prim.UUID = new UUID((String)row["UUID"]);
-            // explicit conversion of integers is required, which sort
-            // of sucks.  No idea if there is a shortcut here or not.
-            prim.CreationDate = Convert.ToInt32(row["CreationDate"]);
-            prim.Name = row["Name"] == DBNull.Value ? string.Empty : (string)row["Name"];
-            // various text fields
-            prim.Text = (String)row["Text"];
-            prim.Color = Color.FromArgb(Convert.ToInt32(row["ColorA"]),
-                                        Convert.ToInt32(row["ColorR"]),
-                                        Convert.ToInt32(row["ColorG"]),
-                                        Convert.ToInt32(row["ColorB"]));
-            prim.Description = (String)row["Description"];
-            prim.SitName = (String)row["SitName"];
-            prim.TouchName = (String)row["TouchName"];
-            // permissions
-            prim.Flags = (PrimFlags)Convert.ToUInt32(row["ObjectFlags"]);
-            prim.CreatorIdentification = (String)row["CreatorID"];
-            prim.OwnerID = new UUID((String)row["OwnerID"]);
-            prim.GroupID = new UUID((String)row["GroupID"]);
-            prim.LastOwnerID = new UUID((String)row["LastOwnerID"]);
-            prim.RezzerID = row["RezzerID"] == DBNull.Value ? UUID.Zero : new UUID((String)row["RezzerID"]);
-            prim.OwnerMask = Convert.ToUInt32(row["OwnerMask"]);
-            prim.NextOwnerMask = Convert.ToUInt32(row["NextOwnerMask"]);
-            prim.GroupMask = Convert.ToUInt32(row["GroupMask"]);
-            prim.EveryoneMask = Convert.ToUInt32(row["EveryoneMask"]);
-            prim.BaseMask = Convert.ToUInt32(row["BaseMask"]);
-            // vectors
-            prim.OffsetPosition = new Vector3(
-                Convert.ToSingle(row["PositionX"]),
-                Convert.ToSingle(row["PositionY"]),
-                Convert.ToSingle(row["PositionZ"])
-                );
-            prim.GroupPosition = new Vector3(
-                Convert.ToSingle(row["GroupPositionX"]),
-                Convert.ToSingle(row["GroupPositionY"]),
-                Convert.ToSingle(row["GroupPositionZ"])
-                );
-            prim.Velocity = new Vector3(
-                Convert.ToSingle(row["VelocityX"]),
-                Convert.ToSingle(row["VelocityY"]),
-                Convert.ToSingle(row["VelocityZ"])
-                );
-            prim.AngularVelocity = new Vector3(
-                Convert.ToSingle(row["AngularVelocityX"]),
-                Convert.ToSingle(row["AngularVelocityY"]),
-                Convert.ToSingle(row["AngularVelocityZ"])
-                );
-            prim.Acceleration = new Vector3(
-                Convert.ToSingle(row["AccelerationX"]),
-                Convert.ToSingle(row["AccelerationY"]),
-                Convert.ToSingle(row["AccelerationZ"])
-                );
-            // quaternions
-            prim.RotationOffset = new Quaternion(
-                Convert.ToSingle(row["RotationX"]),
-                Convert.ToSingle(row["RotationY"]),
-                Convert.ToSingle(row["RotationZ"]),
-                Convert.ToSingle(row["RotationW"])
-                );
-
-            prim.SitTargetPositionLL = new Vector3(
-                                                   Convert.ToSingle(row["SitTargetOffsetX"]),
-                                                   Convert.ToSingle(row["SitTargetOffsetY"]),
-                                                   Convert.ToSingle(row["SitTargetOffsetZ"]));
-            prim.SitTargetOrientationLL = new Quaternion(
-                                                         Convert.ToSingle(row["SitTargetOrientX"]),
-                                                         Convert.ToSingle(row["SitTargetOrientY"]),
-                                                         Convert.ToSingle(row["SitTargetOrientZ"]),
-                                                         Convert.ToSingle(row["SitTargetOrientW"]));
-
-            prim.StandOffset = new Vector3(
-                            Convert.ToSingle(row["standtargetx"]),
-                            Convert.ToSingle(row["standtargety"]),
-                            Convert.ToSingle(row["standtargetz"])
-                            );
-
-            prim.SitActiveRange = Convert.ToSingle(row["sitactrange"]);
-
-            prim.ClickAction = Convert.ToByte(row["ClickAction"]);
-            prim.PayPrice[0] = Convert.ToInt32(row["PayPrice"]);
-            prim.PayPrice[1] = Convert.ToInt32(row["PayButton1"]);
-            prim.PayPrice[2] = Convert.ToInt32(row["PayButton2"]);
-            prim.PayPrice[3] = Convert.ToInt32(row["PayButton3"]);
-            prim.PayPrice[4] = Convert.ToInt32(row["PayButton4"]);
-
-            prim.Sound = new UUID(row["LoopedSound"].ToString());
-            prim.SoundGain = Convert.ToSingle(row["LoopedSoundGain"]);
-            if (prim.Sound.IsZero())
-                prim.SoundFlags = 0;
-            else
-                prim.SoundFlags = 1; // If it's persisted at all, it's looped
-
-            if (!row.IsNull("TextureAnimation"))
-                prim.TextureAnimation = Convert.FromBase64String(row["TextureAnimation"].ToString());
-            if (!row.IsNull("ParticleSystem"))
-                prim.ParticleSystem = Convert.FromBase64String(row["ParticleSystem"].ToString());
-
-            prim.SetCameraEyeOffset(new Vector3(
-                Convert.ToSingle(row["CameraEyeOffsetX"]),
-                Convert.ToSingle(row["CameraEyeOffsetY"]),
-                Convert.ToSingle(row["CameraEyeOffsetZ"])
-                ));
-
-            prim.SetCameraAtOffset(new Vector3(
-                Convert.ToSingle(row["CameraAtOffsetX"]),
-                Convert.ToSingle(row["CameraAtOffsetY"]),
-                Convert.ToSingle(row["CameraAtOffsetZ"])
-                ));
-
-            if (Convert.ToInt16(row["ForceMouselook"]) != 0)
-                prim.SetForceMouselook(true);
-
-            prim.ScriptAccessPin = Convert.ToInt32(row["ScriptAccessPin"]);
-
-            if (Convert.ToInt16(row["AllowedDrop"]) != 0)
-                prim.AllowedDrop = true;
-
-            if (Convert.ToInt16(row["DieAtEdge"]) != 0)
-                prim.DIE_AT_EDGE = true;
-
-            prim.SalePrice = Convert.ToInt32(row["SalePrice"]);
-            prim.ObjectSaleType = Convert.ToByte(row["SaleType"]);
-
-            prim.Material = Convert.ToByte(row["Material"]);
-
-            prim.CollisionSound = new UUID(row["CollisionSound"].ToString());
-            prim.CollisionSoundVolume = Convert.ToSingle(row["CollisionSoundVolume"]);
-
-            if (Convert.ToInt16(row["VolumeDetect"]) != 0)
-                prim.VolumeDetectActive = true;
-
-            if (!(row["MediaURL"] is System.DBNull))
-            {
-//                m_log.DebugFormat("[MongoDB]: MediaUrl type [{0}]", row["MediaURL"].GetType());
-                prim.MediaUrl = (string)row["MediaURL"];
-            }
-
-            prim.AttachedPos = new Vector3(
-                Convert.ToSingle(row["AttachedPosX"]),
-                Convert.ToSingle(row["AttachedPosY"]),
-                Convert.ToSingle(row["AttachedPosZ"])
-                );
-
-            if (!(row["DynAttrs"] is System.DBNull))
-            {
-                //m_log.DebugFormat("[MongoDB]: DynAttrs type [{0}]", row["DynAttrs"].GetType());
-                prim.DynAttrs = DAMap.FromXml((string)row["DynAttrs"]);
-            }
-            else
-            {
-                prim.DynAttrs = null;
-            }
-
-            prim.PhysicsShapeType = Convert.ToByte(row["PhysicsShapeType"]);
-            prim.Density = Convert.ToSingle(row["Density"]);
-            prim.GravityModifier = Convert.ToSingle(row["GravityModifier"]);
-            prim.Friction = Convert.ToSingle(row["Friction"]);
-            prim.Restitution = Convert.ToSingle(row["Restitution"]);
-
-
-            if (!(row["KeyframeMotion"] is DBNull))
-            {
-                Byte[] data = (byte[])row["KeyframeMotion"];
-                if (data.Length > 0)
-                    prim.KeyframeMotion = KeyframeMotion.FromData(null, data);
-                else
-                    prim.KeyframeMotion = null;
-            }
-            else
-            {
-                prim.KeyframeMotion = null;
-            }
-
-            prim.PassCollisions = Convert.ToBoolean(row["PassCollisions"]);
-            prim.PassTouches = Convert.ToBoolean(row["PassTouches"]);
-            prim.RotationAxisLocks = Convert.ToByte(row["RotationAxisLocks"]);
-
-            SOPVehicle vehicle = null;
-            if (!(row["Vehicle"] is DBNull) && row["Vehicle"].ToString() != String.Empty)
-            {
-                vehicle = SOPVehicle.FromXml2(row["Vehicle"].ToString());
-                if (vehicle != null)
-                    prim.VehicleParams = vehicle;
-            }
-
-            PhysicsInertiaData pdata = null;
-            if (!(row["PhysInertia"] is DBNull) && row["PhysInertia"].ToString() != String.Empty)
-                pdata = PhysicsInertiaData.FromXml2(row["PhysInertia"].ToString());
-            prim.PhysicsInertia = pdata;
-
-            int pseudocrc = Convert.ToInt32(row["pseudocrc"]);
-            if(pseudocrc != 0)
-                prim.PseudoCRC = pseudocrc;
-
-            if (row["sopanims"] is not DBNull)
-            {
-                byte[] data = (byte[])row["sopanims"];
-                if (data.Length > 0)
-                    prim.DeSerializeAnimations(data);
-                else
-                    prim.Animations = null;
-            }
-            else
-            {
-                prim.Animations = null;
-            }
-
-            return prim;
-        }
-
-        /// <summary>
-        /// Build a prim inventory item from the persisted data.
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private static TaskInventoryItem buildItem(DataRow row)
-        {
-            TaskInventoryItem taskItem = new TaskInventoryItem();
-
-            taskItem.ItemID = new UUID((String)row["itemID"]);
-            taskItem.ParentPartID = new UUID((String)row["primID"]);
-            taskItem.AssetID = new UUID((String)row["assetID"]);
-            taskItem.ParentID = new UUID((String)row["parentFolderID"]);
-
-            taskItem.InvType = Convert.ToInt32(row["invType"]);
-            taskItem.Type = Convert.ToInt32(row["assetType"]);
-
-            taskItem.Name = (String)row["name"];
-            taskItem.Description = (String)row["description"];
-            taskItem.CreationDate = Convert.ToUInt32(row["creationDate"]);
-            taskItem.CreatorIdentification = (String)row["creatorID"];
-            taskItem.OwnerID = new UUID((String)row["ownerID"]);
-            taskItem.LastOwnerID = new UUID((String)row["lastOwnerID"]);
-            taskItem.GroupID = new UUID((String)row["groupID"]);
-
-            taskItem.NextPermissions = Convert.ToUInt32(row["nextPermissions"]);
-            taskItem.CurrentPermissions = Convert.ToUInt32(row["currentPermissions"]);
-            taskItem.BasePermissions = Convert.ToUInt32(row["basePermissions"]);
-            taskItem.EveryonePermissions = Convert.ToUInt32(row["everyonePermissions"]);
-            taskItem.GroupPermissions = Convert.ToUInt32(row["groupPermissions"]);
-            taskItem.Flags = Convert.ToUInt32(row["flags"]);
-
-            return taskItem;
-        }
-
-        /// <summary>
-        /// Build a Land Data from the persisted data.
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private LandData buildLandData(DataRow row)
-        {
-            LandData newData = new LandData();
-
-            newData.GlobalID = new UUID((String)row["UUID"]);
-            newData.LocalID = Convert.ToInt32(row["LocalLandID"]);
-
-            // Bitmap is a byte[512]
-            newData.Bitmap = (Byte[])row["Bitmap"];
-
-            newData.Name = (String)row["Name"];
-            newData.Description = (String)row["Desc"];
-            newData.OwnerID = (UUID)(String)row["OwnerUUID"];
-            newData.IsGroupOwned = Convert.ToBoolean(row["IsGroupOwned"]);
-            newData.Area = Convert.ToInt32(row["Area"]);
-            newData.AuctionID = Convert.ToUInt32(row["AuctionID"]); //Unemplemented
-            newData.Category = (ParcelCategory)Convert.ToInt32(row["Category"]);
-            //Enum OpenMetaverse.Parcel.ParcelCategory
-            newData.ClaimDate = Convert.ToInt32(row["ClaimDate"]);
-            newData.ClaimPrice = Convert.ToInt32(row["ClaimPrice"]);
-            newData.GroupID = new UUID((String)row["GroupUUID"]);
-            newData.SalePrice = Convert.ToInt32(row["SalePrice"]);
-            newData.Status = (ParcelStatus)Convert.ToInt32(row["LandStatus"]);
-            //Enum. OpenMetaverse.Parcel.ParcelStatus
-            newData.Flags = Convert.ToUInt32(row["LandFlags"]);
-            newData.LandingType = (Byte)row["LandingType"];
-            newData.MediaAutoScale = (Byte)row["MediaAutoScale"];
-            newData.MediaID = new UUID((String)row["MediaTextureUUID"]);
-            newData.MediaURL = (String)row["MediaURL"];
-            newData.MusicURL = (String)row["MusicURL"];
-            newData.PassHours = Convert.ToSingle(row["PassHours"]);
-            newData.PassPrice = Convert.ToInt32(row["PassPrice"]);
-            newData.SnapshotID = (UUID)(String)row["SnapshotUUID"];
-            newData.Dwell = Convert.ToInt32(row["Dwell"]);
-            newData.MediaType = (String)row["MediaType"];
-            newData.MediaDescription = (String)row["MediaDescription"];
-            string[] sizes = ((string)row["MediaSize"]).Split(',');
-            if (sizes.Length > 1)
-            {
-                newData.MediaWidth = Convert.ToInt32(sizes[0]);
-                newData.MediaHeight = Convert.ToInt32(sizes[1]);
-            }
-            newData.MediaLoop = Convert.ToBoolean(row["MediaLoop"]);
-            newData.ObscureMedia = Convert.ToBoolean(row["ObscureMedia"]);
-            newData.ObscureMusic = Convert.ToBoolean(row["ObscureMusic"]);
-            newData.SeeAVs = Convert.ToBoolean(row["SeeAVs"]);
-            newData.AnyAVSounds = Convert.ToBoolean(row["AnyAVSounds"]);
-            newData.GroupAVSounds = Convert.ToBoolean(row["GroupAVSounds"]);
-
-            try
-            {
-                newData.UserLocation =
-                    new Vector3(Convert.ToSingle(row["UserLocationX"]), Convert.ToSingle(row["UserLocationY"]),
-                                  Convert.ToSingle(row["UserLocationZ"]));
-                newData.UserLookAt =
-                    new Vector3(Convert.ToSingle(row["UserLookAtX"]), Convert.ToSingle(row["UserLookAtY"]),
-                                  Convert.ToSingle(row["UserLookAtZ"]));
-
-            }
-            catch (InvalidCastException)
-            {
-                m_log.ErrorFormat("[MongoDB REGION DB]: unable to get parcel telehub settings for {1}", newData.Name);
-                newData.UserLocation = Vector3.Zero;
-                newData.UserLookAt = Vector3.Zero;
-            }
-            newData.ParcelAccessList = new List<LandAccessEntry>();
-            UUID.TryParse((string)row["AuthbuyerID"], out UUID authBuyerID);
-            newData.AuthBuyerID = authBuyerID;
-
-            newData.OtherCleanTime = Convert.ToInt32(row["OtherCleanTime"]);
-
-            if (row["environment"] is DBNull)
-            {
-                newData.Environment = null;
-                newData.EnvironmentVersion = -1;
-            }
-            else
-            {
-                string env = (string)row["environment"];
-                if (string.IsNullOrEmpty(env))
-                {
-                    newData.Environment = null;
-                    newData.EnvironmentVersion = -1;
-                }
-                else
-                {
-                    try
-                    {
-                        ViewerEnvironment VEnv = ViewerEnvironment.FromOSDString(env);
-                        newData.Environment = VEnv;
-                        newData.EnvironmentVersion = VEnv.version;
-                    }
-                    catch
-                    {
-                        newData.Environment = null;
-                        newData.EnvironmentVersion = -1;
-                    }
-                }
-            }
-
-
-            return newData;
-        }
-
-        private RegionSettings buildRegionSettings(DataRow row)
-        {
-            RegionSettings newSettings = new RegionSettings();
-
-            newSettings.RegionUUID = new UUID((string)row["regionUUID"]);
-            newSettings.BlockTerraform = Convert.ToBoolean(row["block_terraform"]);
-            newSettings.AllowDamage = Convert.ToBoolean(row["allow_damage"]);
-            newSettings.BlockFly = Convert.ToBoolean(row["block_fly"]);
-            newSettings.RestrictPushing = Convert.ToBoolean(row["restrict_pushing"]);
-            newSettings.AllowLandResell = Convert.ToBoolean(row["allow_land_resell"]);
-            newSettings.AllowLandJoinDivide = Convert.ToBoolean(row["allow_land_join_divide"]);
-            newSettings.BlockShowInSearch = Convert.ToBoolean(row["block_show_in_search"]);
-            newSettings.AgentLimit = Convert.ToInt32(row["agent_limit"]);
-            newSettings.ObjectBonus = Convert.ToDouble(row["object_bonus"]);
-            newSettings.Maturity = Convert.ToInt32(row["maturity"]);
-            newSettings.DisableScripts = Convert.ToBoolean(row["disable_scripts"]);
-            newSettings.DisableCollisions = Convert.ToBoolean(row["disable_collisions"]);
-            newSettings.DisablePhysics = Convert.ToBoolean(row["disable_physics"]);
-            newSettings.TerrainTexture1 = new UUID((String)row["terrain_texture_1"]);
-            newSettings.TerrainTexture2 = new UUID((String)row["terrain_texture_2"]);
-            newSettings.TerrainTexture3 = new UUID((String)row["terrain_texture_3"]);
-            newSettings.TerrainTexture4 = new UUID((String)row["terrain_texture_4"]);
-            newSettings.Elevation1NW = Convert.ToDouble(row["elevation_1_nw"]);
-            newSettings.Elevation2NW = Convert.ToDouble(row["elevation_2_nw"]);
-            newSettings.Elevation1NE = Convert.ToDouble(row["elevation_1_ne"]);
-            newSettings.Elevation2NE = Convert.ToDouble(row["elevation_2_ne"]);
-            newSettings.Elevation1SE = Convert.ToDouble(row["elevation_1_se"]);
-            newSettings.Elevation2SE = Convert.ToDouble(row["elevation_2_se"]);
-            newSettings.Elevation1SW = Convert.ToDouble(row["elevation_1_sw"]);
-            newSettings.Elevation2SW = Convert.ToDouble(row["elevation_2_sw"]);
-            newSettings.WaterHeight = Convert.ToDouble(row["water_height"]);
-            newSettings.TerrainRaiseLimit = Convert.ToDouble(row["terrain_raise_limit"]);
-            newSettings.TerrainLowerLimit = Convert.ToDouble(row["terrain_lower_limit"]);
-            newSettings.UseEstateSun = Convert.ToBoolean(row["use_estate_sun"]);
-            newSettings.Sandbox = Convert.ToBoolean(row["sandbox"]);
-            newSettings.SunVector = new Vector3(
-                                     Convert.ToSingle(row["sunvectorx"]),
-                                     Convert.ToSingle(row["sunvectory"]),
-                                     Convert.ToSingle(row["sunvectorz"])
-                                     );
-            newSettings.FixedSun = Convert.ToBoolean(row["fixed_sun"]);
-            newSettings.SunPosition = Convert.ToDouble(row["sun_position"]);
-            newSettings.Covenant = new UUID((String)row["covenant"]);
-            newSettings.CovenantChangedDateTime = Convert.ToInt32(row["covenant_datetime"]);
-            newSettings.TerrainImageID = new UUID((String)row["map_tile_ID"]);
-            newSettings.TelehubObject = new UUID((String)row["TelehubObject"]);
-            newSettings.ParcelImageID = new UUID((String)row["parcel_tile_ID"]);
-            newSettings.GodBlockSearch = Convert.ToBoolean(row["block_search"]);
-            newSettings.Casino = Convert.ToBoolean(row["casino"]);
-            if (row["cacheID"] is not System.DBNull)
-                newSettings.CacheID = new UUID((String)row["cacheID"]);
-
-            newSettings.TerrainPBR1 = new UUID((String)row["TerrainPBR1"]);
-            newSettings.TerrainPBR2 = new UUID((String)row["TerrainPBR2"]);
-            newSettings.TerrainPBR3 = new UUID((String)row["TerrainPBR3"]);
-            newSettings.TerrainPBR4 = new UUID((String)row["TerrainPBR4"]);
-
-            return newSettings;
-        }
-
-        /// <summary>
-        /// Build a land access entry from the persisted data.
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private static LandAccessEntry buildLandAccessData(DataRow row)
-        {
-            LandAccessEntry entry = new LandAccessEntry();
-            entry.AgentID = new UUID((string)row["AccessUUID"]);
-            entry.Flags = (AccessList)row["Flags"];
-            entry.Expires = 0;
-            return entry;
-        }
-
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="prim"></param>
-        /// <param name="sceneGroupID"></param>
-        /// <param name="regionUUID"></param>
-        private static void fillPrimRow(DataRow row, SceneObjectPart prim, UUID sceneGroupID, UUID regionUUID)
-        {
-            row["UUID"] = prim.UUID.ToString();
-            row["RegionUUID"] = regionUUID.ToString();
-            row["CreationDate"] = prim.CreationDate;
-            row["Name"] = prim.Name;
-            row["SceneGroupID"] = sceneGroupID.ToString();
-            // the UUID of the root part for this SceneObjectGroup
-            // various text fields
-            row["Text"] = prim.Text;
-            row["Description"] = prim.Description;
-            row["SitName"] = prim.SitName;
-            row["TouchName"] = prim.TouchName;
-            // permissions
-            row["ObjectFlags"] = (uint)prim.Flags;
-            row["CreatorID"] = prim.CreatorIdentification.ToString();
-            row["OwnerID"] = prim.OwnerID.ToString();
-            row["GroupID"] = prim.GroupID.ToString();
-            row["LastOwnerID"] = prim.LastOwnerID.ToString();
-            row["RezzerID"] = prim.RezzerID.ToString();
-            row["OwnerMask"] = prim.OwnerMask;
-            row["NextOwnerMask"] = prim.NextOwnerMask;
-            row["GroupMask"] = prim.GroupMask;
-            row["EveryoneMask"] = prim.EveryoneMask;
-            row["BaseMask"] = prim.BaseMask;
-            // vectors
-            row["PositionX"] = prim.OffsetPosition.X;
-            row["PositionY"] = prim.OffsetPosition.Y;
-            row["PositionZ"] = prim.OffsetPosition.Z;
-            row["GroupPositionX"] = prim.GroupPosition.X;
-            row["GroupPositionY"] = prim.GroupPosition.Y;
-            row["GroupPositionZ"] = prim.GroupPosition.Z;
-            row["VelocityX"] = prim.Velocity.X;
-            row["VelocityY"] = prim.Velocity.Y;
-            row["VelocityZ"] = prim.Velocity.Z;
-            row["AngularVelocityX"] = prim.AngularVelocity.X;
-            row["AngularVelocityY"] = prim.AngularVelocity.Y;
-            row["AngularVelocityZ"] = prim.AngularVelocity.Z;
-            row["AccelerationX"] = prim.Acceleration.X;
-            row["AccelerationY"] = prim.Acceleration.Y;
-            row["AccelerationZ"] = prim.Acceleration.Z;
-            // quaternions
-            row["RotationX"] = prim.RotationOffset.X;
-            row["RotationY"] = prim.RotationOffset.Y;
-            row["RotationZ"] = prim.RotationOffset.Z;
-            row["RotationW"] = prim.RotationOffset.W;
-
-            // Sit target
-            Vector3 sitTargetPos = prim.SitTargetPositionLL;
-            row["SitTargetOffsetX"] = sitTargetPos.X;
-            row["SitTargetOffsetY"] = sitTargetPos.Y;
-            row["SitTargetOffsetZ"] = sitTargetPos.Z;
-
-            Quaternion sitTargetOrient = prim.SitTargetOrientationLL;
-            row["SitTargetOrientW"] = sitTargetOrient.W;
-            row["SitTargetOrientX"] = sitTargetOrient.X;
-            row["SitTargetOrientY"] = sitTargetOrient.Y;
-            row["SitTargetOrientZ"] = sitTargetOrient.Z;
-
-            Vector3 standTarget = prim.StandOffset;
-            row["standtargetx"] = standTarget.X;
-            row["standtargety"] = standTarget.Y;
-            row["standtargetz"] = standTarget.Z;
-
-            row["sitactrange"] = prim.SitActiveRange;
-
-            row["ColorR"] = Convert.ToInt32(prim.Color.R);
-            row["ColorG"] = Convert.ToInt32(prim.Color.G);
-            row["ColorB"] = Convert.ToInt32(prim.Color.B);
-            row["ColorA"] = Convert.ToInt32(prim.Color.A);
-            row["PayPrice"] = prim.PayPrice[0];
-            row["PayButton1"] = prim.PayPrice[1];
-            row["PayButton2"] = prim.PayPrice[2];
-            row["PayButton3"] = prim.PayPrice[3];
-            row["PayButton4"] = prim.PayPrice[4];
-
-            row["TextureAnimation"] = Convert.ToBase64String(prim.TextureAnimation);
-            row["ParticleSystem"] = Convert.ToBase64String(prim.ParticleSystem);
-
-            row["CameraEyeOffsetX"] = prim.GetCameraEyeOffset().X;
-            row["CameraEyeOffsetY"] = prim.GetCameraEyeOffset().Y;
-            row["CameraEyeOffsetZ"] = prim.GetCameraEyeOffset().Z;
-
-            row["CameraAtOffsetX"] = prim.GetCameraAtOffset().X;
-            row["CameraAtOffsetY"] = prim.GetCameraAtOffset().Y;
-            row["CameraAtOffsetZ"] = prim.GetCameraAtOffset().Z;
-
-            if ((prim.SoundFlags & 1) != 0) // Looped
-            {
-                row["LoopedSound"] = prim.Sound.ToString();
-                row["LoopedSoundGain"] = prim.SoundGain;
-            }
-            else
-            {
-                row["LoopedSound"] = UUID.Zero.ToString();
-                row["LoopedSoundGain"] = 0.0f;
-            }
-
-            if (prim.GetForceMouselook())
-                row["ForceMouselook"] = 1;
-            else
-                row["ForceMouselook"] = 0;
-
-            row["ScriptAccessPin"] = prim.ScriptAccessPin;
-
-            if (prim.AllowedDrop)
-                row["AllowedDrop"] = 1;
-            else
-                row["AllowedDrop"] = 0;
-
-            if (prim.DIE_AT_EDGE)
-                row["DieAtEdge"] = 1;
-            else
-                row["DieAtEdge"] = 0;
-
-            row["SalePrice"] = prim.SalePrice;
-            row["SaleType"] = Convert.ToInt16(prim.ObjectSaleType);
-
-            // click action
-            row["ClickAction"] = prim.ClickAction;
-
-            row["Material"] = prim.Material;
-
-            row["CollisionSound"] = prim.CollisionSound.ToString();
-            row["CollisionSoundVolume"] = prim.CollisionSoundVolume;
-            if (prim.VolumeDetectActive)
-                row["VolumeDetect"] = 1;
-            else
-                row["VolumeDetect"] = 0;
-
-            row["MediaURL"] = prim.MediaUrl;
-
-            row["AttachedPosX"] = prim.AttachedPos.X;
-            row["AttachedPosY"] = prim.AttachedPos.Y;
-            row["AttachedPosZ"] = prim.AttachedPos.Z;
-
-            if (prim.DynAttrs!= null && prim.DynAttrs.CountNamespaces > 0)
-                row["DynAttrs"] = prim.DynAttrs.ToXml();
-            else
-                row["DynAttrs"] = null;
-
-            row["PhysicsShapeType"] = prim.PhysicsShapeType;
-            row["Density"] = (double)prim.Density;
-            row["GravityModifier"] = (double)prim.GravityModifier;
-            row["Friction"] = (double)prim.Friction;
-            row["Restitution"] = (double)prim.Restitution;
-
-            if (prim.KeyframeMotion != null)
-                row["KeyframeMotion"] = prim.KeyframeMotion.Serialize();
-            else
-                row["KeyframeMotion"] = Array.Empty<byte>();
-
-            row["PassTouches"] = prim.PassTouches;
-            row["PassCollisions"] = prim.PassCollisions;
-            row["RotationAxisLocks"] = prim.RotationAxisLocks;
-
-            if (prim.VehicleParams != null)
-                row["Vehicle"] = prim.VehicleParams.ToXml2();
-            else
-                row["Vehicle"] = String.Empty;
-
-            if (prim.PhysicsInertia != null)
-                row["PhysInertia"] = prim.PhysicsInertia.ToXml2();
-            else
-                row["PhysInertia"] = String.Empty;
-
-            row["pseudocrc"] = prim.PseudoCRC;
-            row["sopanims"] = prim.SerializeAnimations();
-
-            if (prim.IsRoot && prim.ParentGroup.LinksetData is not null)
-                row["lnkstBinData"] = prim.ParentGroup.LinksetData.ToBin();
-            else
-                row["lnkstBinData"] = null;
-
-            if (prim.IsRoot)
-                row["StartStr"] = prim.ParentGroup.RezStringParameter;
-            else
-                row["StartStr"] = null;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="taskItem"></param>
-        private static void fillItemRow(DataRow row, TaskInventoryItem taskItem)
-        {
-            row["itemID"] = taskItem.ItemID.ToString();
-            row["primID"] = taskItem.ParentPartID.ToString();
-            row["assetID"] = taskItem.AssetID.ToString();
-            row["parentFolderID"] = taskItem.ParentID.ToString();
-
-            row["invType"] = taskItem.InvType;
-            row["assetType"] = taskItem.Type;
-
-            row["name"] = taskItem.Name;
-            row["description"] = taskItem.Description;
-            row["creationDate"] = taskItem.CreationDate;
-            row["creatorID"] = taskItem.CreatorIdentification.ToString();
-            row["ownerID"] = taskItem.OwnerID.ToString();
-            row["lastOwnerID"] = taskItem.LastOwnerID.ToString();
-            row["groupID"] = taskItem.GroupID.ToString();
-            row["nextPermissions"] = taskItem.NextPermissions;
-            row["currentPermissions"] = taskItem.CurrentPermissions;
-            row["basePermissions"] = taskItem.BasePermissions;
-            row["everyonePermissions"] = taskItem.EveryonePermissions;
-            row["groupPermissions"] = taskItem.GroupPermissions;
-            row["flags"] = taskItem.Flags;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="land"></param>
-        /// <param name="regionUUID"></param>
-        private static void fillLandRow(DataRow row, LandData land, UUID regionUUID)
-        {
-            row["UUID"] = land.GlobalID.ToString();
-            row["RegionUUID"] = regionUUID.ToString();
-            row["LocalLandID"] = land.LocalID;
-
-            // Bitmap is a byte[512]
-            row["Bitmap"] = land.Bitmap;
-
-            row["Name"] = land.Name;
-            row["Desc"] = land.Description;
-            row["OwnerUUID"] = land.OwnerID.ToString();
-            row["IsGroupOwned"] = land.IsGroupOwned.ToString();
-            row["Area"] = land.Area;
-            row["AuctionID"] = land.AuctionID; //Unemplemented
-            row["Category"] = land.Category; //Enum OpenMetaverse.Parcel.ParcelCategory
-            row["ClaimDate"] = land.ClaimDate;
-            row["ClaimPrice"] = land.ClaimPrice;
-            row["GroupUUID"] = land.GroupID.ToString();
-            row["SalePrice"] = land.SalePrice;
-            row["LandStatus"] = land.Status; //Enum. OpenMetaverse.Parcel.ParcelStatus
-            row["LandFlags"] = land.Flags;
-            row["LandingType"] = land.LandingType;
-            row["MediaAutoScale"] = land.MediaAutoScale;
-            row["MediaTextureUUID"] = land.MediaID.ToString();
-            row["MediaURL"] = land.MediaURL;
-            row["MusicURL"] = land.MusicURL;
-            row["PassHours"] = land.PassHours;
-            row["PassPrice"] = land.PassPrice;
-            row["SnapshotUUID"] = land.SnapshotID.ToString();
-            row["UserLocationX"] = land.UserLocation.X;
-            row["UserLocationY"] = land.UserLocation.Y;
-            row["UserLocationZ"] = land.UserLocation.Z;
-            row["UserLookAtX"] = land.UserLookAt.X;
-            row["UserLookAtY"] = land.UserLookAt.Y;
-            row["UserLookAtZ"] = land.UserLookAt.Z;
-            row["AuthbuyerID"] = land.AuthBuyerID.ToString();
-            row["OtherCleanTime"] = land.OtherCleanTime;
-            row["Dwell"] = land.Dwell;
-            row["MediaType"] = land.MediaType;
-            row["MediaDescription"] = land.MediaDescription;
-            row["MediaSize"] = String.Format("{0},{1}", land.MediaWidth, land.MediaHeight);
-            row["MediaLoop"] = land.MediaLoop;
-            row["ObscureMusic"] = land.ObscureMusic;
-            row["ObscureMedia"] = land.ObscureMedia;
-            row["SeeAVs"] = land.SeeAVs;
-            row["AnyAVSounds"] = land.AnyAVSounds;
-            row["GroupAVSounds"] = land.GroupAVSounds;
-
-            if (land.Environment == null)
-                row["environment"] = "";
-            else
-            {
-                try
-                {
-                    row["environment"] = ViewerEnvironment.ToOSDString(land.Environment);
-                }
-                catch
-                {
-                    row["environment"] = "";
-                }
-            }
-
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="entry"></param>
-        /// <param name="parcelID"></param>
-        private static void fillLandAccessRow(DataRow row, LandAccessEntry entry, UUID parcelID)
-        {
-            row["LandUUID"] = parcelID.ToString();
-            row["AccessUUID"] = entry.AgentID.ToString();
-            row["Flags"] = entry.Flags;
-        }
-
-        private static void fillRegionSettingsRow(DataRow row, RegionSettings settings)
-        {
-            row["regionUUID"] = settings.RegionUUID.ToString();
-            row["block_terraform"] = settings.BlockTerraform;
-            row["block_fly"] = settings.BlockFly;
-            row["allow_damage"] = settings.AllowDamage;
-            row["restrict_pushing"] = settings.RestrictPushing;
-            row["allow_land_resell"] = settings.AllowLandResell;
-            row["allow_land_join_divide"] = settings.AllowLandJoinDivide;
-            row["block_show_in_search"] = settings.BlockShowInSearch;
-            row["agent_limit"] = settings.AgentLimit;
-            row["object_bonus"] = settings.ObjectBonus;
-            row["maturity"] = settings.Maturity;
-            row["disable_scripts"] = settings.DisableScripts;
-            row["disable_collisions"] = settings.DisableCollisions;
-            row["disable_physics"] = settings.DisablePhysics;
-            row["terrain_texture_1"] = settings.TerrainTexture1.ToString();
-            row["terrain_texture_2"] = settings.TerrainTexture2.ToString();
-            row["terrain_texture_3"] = settings.TerrainTexture3.ToString();
-            row["terrain_texture_4"] = settings.TerrainTexture4.ToString();
-            row["elevation_1_nw"] = settings.Elevation1NW;
-            row["elevation_2_nw"] = settings.Elevation2NW;
-            row["elevation_1_ne"] = settings.Elevation1NE;
-            row["elevation_2_ne"] = settings.Elevation2NE;
-            row["elevation_1_se"] = settings.Elevation1SE;
-            row["elevation_2_se"] = settings.Elevation2SE;
-            row["elevation_1_sw"] = settings.Elevation1SW;
-            row["elevation_2_sw"] = settings.Elevation2SW;
-            row["water_height"] = settings.WaterHeight;
-            row["terrain_raise_limit"] = settings.TerrainRaiseLimit;
-            row["terrain_lower_limit"] = settings.TerrainLowerLimit;
-            row["use_estate_sun"] = settings.UseEstateSun;
-            row["sandbox"] = settings.Sandbox; // unlike other database modules, MongoDB uses a lower case s for sandbox!
-            row["sunvectorx"] = settings.SunVector.X;
-            row["sunvectory"] = settings.SunVector.Y;
-            row["sunvectorz"] = settings.SunVector.Z;
-            row["fixed_sun"] = settings.FixedSun;
-            row["sun_position"] = settings.SunPosition;
-            row["covenant"] = settings.Covenant.ToString();
-            row["covenant_datetime"] = settings.CovenantChangedDateTime;
-            row["map_tile_ID"] = settings.TerrainImageID.ToString();
-            row["TelehubObject"] = settings.TelehubObject.ToString();
-            row["parcel_tile_ID"] = settings.ParcelImageID.ToString();
-            row["block_search"] = settings.GodBlockSearch;
-            row["casino"] = settings.Casino;
-            row["cacheID"] = settings.CacheID;
-
-            row["TerrainPBR1"] = settings.TerrainPBR1.ToString();
-            row["TerrainPBR2"] = settings.TerrainPBR2.ToString();
-            row["TerrainPBR3"] = settings.TerrainPBR3.ToString();
-            row["TerrainPBR4"] = settings.TerrainPBR4.ToString();
-
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private PrimitiveBaseShape buildShape(DataRow row)
-        {
-            PrimitiveBaseShape s = new PrimitiveBaseShape();
-            s.Scale = new Vector3(
-                Convert.ToSingle(row["ScaleX"]),
-                Convert.ToSingle(row["ScaleY"]),
-                Convert.ToSingle(row["ScaleZ"])
-                );
-            // paths
-            s.PCode = Convert.ToByte(row["PCode"]);
-            s.PathBegin = Convert.ToUInt16(row["PathBegin"]);
-            s.PathEnd = Convert.ToUInt16(row["PathEnd"]);
-            s.PathScaleX = Convert.ToByte(row["PathScaleX"]);
-            s.PathScaleY = Convert.ToByte(row["PathScaleY"]);
-            s.PathShearX = Convert.ToByte(row["PathShearX"]);
-            s.PathShearY = Convert.ToByte(row["PathShearY"]);
-            s.PathSkew = Convert.ToSByte(row["PathSkew"]);
-            s.PathCurve = Convert.ToByte(row["PathCurve"]);
-            s.PathRadiusOffset = Convert.ToSByte(row["PathRadiusOffset"]);
-            s.PathRevolutions = Convert.ToByte(row["PathRevolutions"]);
-            s.PathTaperX = Convert.ToSByte(row["PathTaperX"]);
-            s.PathTaperY = Convert.ToSByte(row["PathTaperY"]);
-            s.PathTwist = Convert.ToSByte(row["PathTwist"]);
-            s.PathTwistBegin = Convert.ToSByte(row["PathTwistBegin"]);
-            // profile
-            s.ProfileBegin = Convert.ToUInt16(row["ProfileBegin"]);
-            s.ProfileEnd = Convert.ToUInt16(row["ProfileEnd"]);
-            s.ProfileCurve = Convert.ToByte(row["ProfileCurve"]);
-            s.ProfileHollow = Convert.ToUInt16(row["ProfileHollow"]);
-            s.State = Convert.ToByte(row["State"]);
-            s.LastAttachPoint = Convert.ToByte(row["LastAttachPoint"]);
-
-            byte[] textureEntry = (byte[])row["Texture"];
-            s.TextureEntry = textureEntry;
-
-            s.ExtraParams = (byte[])row["ExtraParams"];
-
-            if (row["Media"] is not System.DBNull)
-                s.Media = PrimitiveBaseShape.MediaList.FromXml((string)row["Media"]);
-
-            if (row["MatOvrd"] is not System.DBNull)
-                s.RenderMaterialsOvrFromRawBin((byte[])row["MatOvrd"]);
-            else
-                s.RenderMaterialsOvrFromRawBin(null);
-
-            return s;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <param name="prim"></param>
-        private static void fillShapeRow(DataRow row, SceneObjectPart prim)
-        {
-            PrimitiveBaseShape s = prim.Shape;
-            row["UUID"] = prim.UUID.ToString();
-            // shape is an enum
-            row["Shape"] = 0;
-            // vectors
-            row["ScaleX"] = s.Scale.X;
-            row["ScaleY"] = s.Scale.Y;
-            row["ScaleZ"] = s.Scale.Z;
-            // paths
-            row["PCode"] = s.PCode;
-            row["PathBegin"] = s.PathBegin;
-            row["PathEnd"] = s.PathEnd;
-            row["PathScaleX"] = s.PathScaleX;
-            row["PathScaleY"] = s.PathScaleY;
-            row["PathShearX"] = s.PathShearX;
-            row["PathShearY"] = s.PathShearY;
-            row["PathSkew"] = s.PathSkew;
-            row["PathCurve"] = s.PathCurve;
-            row["PathRadiusOffset"] = s.PathRadiusOffset;
-            row["PathRevolutions"] = s.PathRevolutions;
-            row["PathTaperX"] = s.PathTaperX;
-            row["PathTaperY"] = s.PathTaperY;
-            row["PathTwist"] = s.PathTwist;
-            row["PathTwistBegin"] = s.PathTwistBegin;
-            // profile
-            row["ProfileBegin"] = s.ProfileBegin;
-            row["ProfileEnd"] = s.ProfileEnd;
-            row["ProfileCurve"] = s.ProfileCurve;
-            row["ProfileHollow"] = s.ProfileHollow;
-            row["State"] = s.State;
-            row["LastAttachPoint"] = s.LastAttachPoint;
-
-            row["Texture"] = s.TextureEntry;
-            row["ExtraParams"] = s.ExtraParams;
-
-            if (s.Media is not null)
-                row["Media"] = s.Media.ToXml();
-
-            row["MatOvrd"] = s.RenderMaterialsOvrToRawBin();
-        }
-
-        /// <summary>
-        /// Persistently store a prim.
-        /// </summary>
-        /// <param name="prim"></param>
-        /// <param name="sceneGroupID"></param>
-        /// <param name="regionUUID"></param>
-        private void addPrim(SceneObjectPart prim, UUID sceneGroupID, UUID regionUUID)
-        {
-            DataTable prims = ds.Tables["prims"];
-            DataTable shapes = ds.Tables["primshapes"];
-
-            DataRow primRow = prims.Rows.Find(prim.UUID.ToString());
-            if (primRow == null)
-            {
-                primRow = prims.NewRow();
-                fillPrimRow(primRow, prim, sceneGroupID, regionUUID);
-                prims.Rows.Add(primRow);
-            }
-            else
-            {
-                fillPrimRow(primRow, prim, sceneGroupID, regionUUID);
-            }
-
-            DataRow shapeRow = shapes.Rows.Find(prim.UUID.ToString());
-            if (shapeRow == null)
-            {
-                shapeRow = shapes.NewRow();
-                fillShapeRow(shapeRow, prim);
-                shapes.Rows.Add(shapeRow);
-            }
-            else
-            {
-                fillShapeRow(shapeRow, prim);
-            }
-        }
-
-        /// <summary>
-        /// </summary>
-        /// <param name="primID"></param>
-        /// <param name="items"></param>
-        public void StorePrimInventory(UUID primID, ICollection<TaskInventoryItem> items)
-        {
-//            m_log.DebugFormat("[MongoDB REGION DB]: Entered StorePrimInventory with prim ID {0}", primID);
-
-            DataTable dbItems = ds.Tables["primitems"];
-
-            // For now, we're just going to crudely remove all the previous inventory items
-            // no matter whether they have changed or not, and replace them with the current set.
-            lock (ds)
-            {
-                RemoveItems(primID);
-
-                // repalce with current inventory details
-                foreach (TaskInventoryItem newItem in items)
-                {
-                    //                    m_log.InfoFormat(
-                    //                        "[DATASTORE]: ",
-                    //                        "Adding item {0}, {1} to prim ID {2}",
-                    //                        newItem.Name, newItem.ItemID, newItem.ParentPartID);
-
-                    DataRow newItemRow = dbItems.NewRow();
-                    fillItemRow(newItemRow, newItem);
-                    dbItems.Rows.Add(newItemRow);
-                }
-                Commit();
-            }
-        }
-
-        /***********************************************************************
-         *
-         *  SQL Statement Creation Functions
-         *
-         *  These functions create SQL statements for update, insert, and create.
-         *  They can probably be factored later to have a db independant
-         *  portion and a db specific portion
-         *
-         **********************************************************************/
-
-        /// <summary>
-        /// Create an insert command
-        /// </summary>
-        /// <param name="table">table name</param>
-        /// <param name="dt">data table</param>
-        /// <returns>the created command</returns>
-        /// <remarks>
-        /// This is subtle enough to deserve some commentary.
-        /// Instead of doing *lots* and *lots of hardcoded strings
-        /// for database definitions we'll use the fact that
-        /// realistically all insert statements look like "insert
-        /// into A(b, c) values(:b, :c) on the parameterized query
-        /// front.  If we just have a list of b, c, etc... we can
-        /// generate these strings instead of typing them out.
-        /// </remarks>
-        private static MongoDBCommand createInsertCommand(string table, DataTable dt)
-        {
-            string[] cols = new string[dt.Columns.Count];
-            for (int i = 0; i < dt.Columns.Count; i++)
-            {
-                DataColumn col = dt.Columns[i];
-                cols[i] = col.ColumnName;
-            }
-
-            string sql = "insert into " + table + "(";
-            sql += String.Join(", ", cols);
-            // important, the first ':' needs to be here, the rest get added in the join
-            sql += ") values (:";
-            sql += String.Join(", :", cols);
-            sql += ")";
-//            m_log.DebugFormat("[MongoDB]: Created insert command {0}", sql);
-            MongoDBCommand cmd = new MongoDBCommand(sql);
-
-            // this provides the binding for all our parameters, so
-            // much less code than it used to be
-            foreach (DataColumn col in dt.Columns)
-            {
-                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
-            }
-            return cmd;
-        }
-
-
-        /// <summary>
-        /// create an update command
-        /// </summary>
-        /// <param name="table">table name</param>
-        /// <param name="pk"></param>
-        /// <param name="dt"></param>
-        /// <returns>the created command</returns>
-        private static MongoDBCommand createUpdateCommand(string table, string pk, DataTable dt)
-        {
-            string sql = "update " + table + " set ";
-            string subsql = String.Empty;
-            foreach (DataColumn col in dt.Columns)
-            {
-                if (subsql.Length > 0)
-                {
-                    // a map function would rock so much here
-                    subsql += ", ";
-                }
-                subsql += col.ColumnName + "= :" + col.ColumnName;
-            }
-            sql += subsql;
-            sql += " where " + pk;
-            MongoDBCommand cmd = new MongoDBCommand(sql);
-
-            // this provides the binding for all our parameters, so
-            // much less code than it used to be
-
-            foreach (DataColumn col in dt.Columns)
-            {
-                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
-            }
-            return cmd;
-        }
-
-        /// <summary>
-        /// create an update command
-        /// </summary>
-        /// <param name="table">table name</param>
-        /// <param name="pk"></param>
-        /// <param name="dt"></param>
-        /// <returns>the created command</returns>
-        private static MongoDBCommand createUpdateCommand(string table, string pk1, string pk2, DataTable dt)
-        {
-            string sql = "update " + table + " set ";
-            string subsql = String.Empty;
-            foreach (DataColumn col in dt.Columns)
-            {
-                if (subsql.Length > 0)
-                {
-                    // a map function would rock so much here
-                    subsql += ", ";
-                }
-                subsql += col.ColumnName + "= :" + col.ColumnName;
-            }
-            sql += subsql;
-            sql += " where " + pk1 + " and " + pk2;
-            MongoDBCommand cmd = new MongoDBCommand(sql);
-
-            // this provides the binding for all our parameters, so
-            // much less code than it used to be
-
-            foreach (DataColumn col in dt.Columns)
-            {
-                cmd.Parameters.Add(createMongoDBParameter(col.ColumnName, col.DataType));
-            }
-            return cmd;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="dt">Data Table</param>
-        /// <returns></returns>
-        // private static string defineTable(DataTable dt)
-        // {
-        //     string sql = "create table " + dt.TableName + "(";
-        //     string subsql = String.Empty;
-        //     foreach (DataColumn col in dt.Columns)
-        //     {
-        //         if (subsql.Length > 0)
-        //         {
-        //             // a map function would rock so much here
-        //             subsql += ",\n";
-        //         }
-        //         subsql += col.ColumnName + " " + MongoDBType(col.DataType);
-        //         if (dt.PrimaryKey.Length > 0 && col == dt.PrimaryKey[0])
-        //         {
-        //             subsql += " primary key";
-        //         }
-        //     }
-        //     sql += subsql;
-        //     sql += ")";
-        //     return sql;
-        // }
-
-        /***********************************************************************
-         *
-         *  Database Binding functions
-         *
-         *  These will be db specific due to typing, and minor differences
-         *  in databases.
-         *
-         **********************************************************************/
-
-        ///<summary>
-        /// This is a convenience function that collapses 5 repetitive
-        /// lines for defining MongoDBParameters to 2 parameters:
-        /// column name and database type.
-        ///
-        /// It assumes certain conventions like :param as the param
-        /// name to replace in parametrized queries, and that source
-        /// version is always current version, both of which are fine
-        /// for us.
-        ///</summary>
-        ///<returns>a built MongoDB parameter</returns>
-        private static MongoDBParameter createMongoDBParameter(string name, Type type)
-        {
-            MongoDBParameter param = new MongoDBParameter();
-            param.ParameterName = ":" + name;
-            param.DbType = dbtypeFromType(type);
-            param.SourceColumn = name;
-            param.SourceVersion = DataRowVersion.Current;
-            return param;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupPrimCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("prims", ds.Tables["prims"]);
-            da.InsertCommand.Connection = conn;
-
-            da.UpdateCommand = createUpdateCommand("prims", "UUID=:UUID", ds.Tables["prims"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from prims where UUID = :UUID");
-            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
-            delete.Connection = conn;
-            da.DeleteCommand = delete;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupItemsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("primitems", ds.Tables["primitems"]);
-            da.InsertCommand.Connection = conn;
-
-            da.UpdateCommand = createUpdateCommand("primitems", "itemID = :itemID", ds.Tables["primitems"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from primitems where itemID = :itemID");
-            delete.Parameters.Add(createMongoDBParameter("itemID", typeof(String)));
-            delete.Connection = conn;
-            da.DeleteCommand = delete;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupTerrainCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("terrain", ds.Tables["terrain"]);
-            da.InsertCommand.Connection = conn;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupLandCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("land", ds.Tables["land"]);
-            da.InsertCommand.Connection = conn;
-
-            da.UpdateCommand = createUpdateCommand("land", "UUID=:UUID", ds.Tables["land"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from land where UUID=:UUID");
-            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
-            da.DeleteCommand = delete;
-            da.DeleteCommand.Connection = conn;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupLandAccessCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("landaccesslist", ds.Tables["landaccesslist"]);
-            da.InsertCommand.Connection = conn;
-
-            da.UpdateCommand = createUpdateCommand("landaccesslist", "LandUUID=:landUUID", "AccessUUID=:AccessUUID", ds.Tables["landaccesslist"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from landaccesslist where LandUUID= :LandUUID and AccessUUID= :AccessUUID");
-            delete.Parameters.Add(createMongoDBParameter("LandUUID", typeof(String)));
-            delete.Parameters.Add(createMongoDBParameter("AccessUUID", typeof(String)));
-            da.DeleteCommand = delete;
-            da.DeleteCommand.Connection = conn;
-        }
-
-        private void setupRegionSettingsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("regionsettings", ds.Tables["regionsettings"]);
-            da.InsertCommand.Connection = conn;
-            da.UpdateCommand = createUpdateCommand("regionsettings", "regionUUID=:regionUUID", ds.Tables["regionsettings"]);
-            da.UpdateCommand.Connection = conn;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupRegionWindlightCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("regionwindlight", ds.Tables["regionwindlight"]);
-            da.InsertCommand.Connection = conn;
-            da.UpdateCommand = createUpdateCommand("regionwindlight", "region_id=:region_id", ds.Tables["regionwindlight"]);
-            da.UpdateCommand.Connection = conn;
-        }
-
-        private void setupRegionEnvironmentCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("regionenvironment", ds.Tables["regionenvironment"]);
-            da.InsertCommand.Connection = conn;
-            da.UpdateCommand = createUpdateCommand("regionenvironment", "region_id=:region_id", ds.Tables["regionenvironment"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from regionenvironment where region_id= :region_id");
-            delete.Parameters.Add(createMongoDBParameter("region_id", typeof(String)));
-            da.DeleteCommand = delete;
-            da.DeleteCommand.Connection = conn;
-        }
-
-        private void setupRegionSpawnPointsCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("spawn_points", ds.Tables["spawn_points"]);
-            da.InsertCommand.Connection = conn;
-            da.UpdateCommand = createUpdateCommand("spawn_points", "RegionID=:RegionID", ds.Tables["spawn_points"]);
-            da.UpdateCommand.Connection = conn;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="da"></param>
-        /// <param name="conn"></param>
-        private void setupShapeCommands(MongoDBDataAdapter da, MongoDBConnection conn)
-        {
-            da.InsertCommand = createInsertCommand("primshapes", ds.Tables["primshapes"]);
-            da.InsertCommand.Connection = conn;
-
-            da.UpdateCommand = createUpdateCommand("primshapes", "UUID=:UUID", ds.Tables["primshapes"]);
-            da.UpdateCommand.Connection = conn;
-
-            MongoDBCommand delete = new MongoDBCommand("delete from primshapes where UUID = :UUID");
-            delete.Parameters.Add(createMongoDBParameter("UUID", typeof(String)));
-            delete.Connection = conn;
-            da.DeleteCommand = delete;
-        }
-
-        /***********************************************************************
-         *
-         *  Type conversion functions
-         *
-         **********************************************************************/
-
-        /// <summary>
-        /// Type conversion function
-        /// </summary>
-        /// <param name="type"></param>
-        /// <returns></returns>
-        private static DbType dbtypeFromType(Type type)
-        {
-            if (type == typeof(String))
-            {
-                return DbType.String;
-            }
-            else if (type == typeof(Int32))
-            {
-                return DbType.Int32;
-            }
-            else if (type == typeof(Double))
-            {
-                return DbType.Double;
-            }
-            else if (type == typeof(Byte))
-            {
-                return DbType.Byte;
-            }
-            else if (type == typeof(Byte[]))
-            {
-                return DbType.Binary;
-            }
-            else if (type == typeof(Boolean))
-            {
-                return DbType.Boolean;
-            }
-            else
-            {
-                return DbType.String;
-            }
-        }
-
-        static void PrintDataSet(DataSet ds)
-        {
-            // Print out any name and extended properties.
-            Console.WriteLine("DataSet is named: {0}", ds.DataSetName);
-            foreach (System.Collections.DictionaryEntry de in ds.ExtendedProperties)
-            {
-                Console.WriteLine("Key = {0}, Value = {1}", de.Key, de.Value);
-            }
-            Console.WriteLine();
-            foreach (DataTable dt in ds.Tables)
-            {
-                Console.WriteLine("=> {0} Table:", dt.TableName);
-                // Print out the column names.
-                for (int curCol = 0; curCol < dt.Columns.Count; curCol++)
-                {
-                    Console.Write(dt.Columns[curCol].ColumnName + "\t");
-                }
-                Console.WriteLine("\n----------------------------------");
-                // Print the DataTable.
-                for (int curRow = 0; curRow < dt.Rows.Count; curRow++)
-                {
-                    for (int curCol = 0; curCol < dt.Columns.Count; curCol++)
-                    {
-                        Console.Write(dt.Rows[curRow][curCol].ToString() + "\t");
-                    }
-                    Console.WriteLine();
-                }
-            }
+            var doc = m_regionSettingsCollection.Find(r => r.regionUUID == regionUUID.Guid).FirstOrDefault();
+            return doc != null ? ConvertFromRegionSettingsDocument(doc) : new RegionSettings(regionUUID.Guid);
         }
 
         public UUID[] GetObjectIDs(UUID regionID)
         {
-            return new UUID[0];
+            var filter = Builders<PrimDocument>.Filter.Eq(p => p.RegionUUID, regionID.Guid);
+            var prims = m_primsCollection.Find(filter).ToList();
+            var ids = new List<UUID>();
+            foreach(var p in prims)
+                if(!ids.Contains(p.SceneGroupID))
+                    ids.Add(p.SceneGroupID);
+            return ids.ToArray();
         }
 
-        public void SaveExtra(UUID regionID, string name, string value)
+        public string LoadRegionEnvironmentSettings(UUID regionUUID)
         {
+            var doc = m_regionEnvironmentCollection.Find(e => e.region_id == regionUUID).FirstOrDefault();
+            return doc?.llsd_settings;
+        }
+
+        public void StoreRegionEnvironmentSettings(UUID regionUUID, string settings)
+        {
+            var doc = new RegionEnvironmentDocument { region_id = regionUUID, llsd_settings = settings };
+            m_regionEnvironmentCollection.ReplaceOne(e => e.region_id == regionUUID, doc, new ReplaceOptions { IsUpsert = true });
+        }
+
+        public void RemoveRegionEnvironmentSettings(UUID regionUUID)
+        {
+            m_regionEnvironmentCollection.DeleteOne(e => e.region_id == regionUUID);
+        }
+
+        public void SaveExtra(UUID regionID, string name, string val)
+        {
+            var filter = Builders<ExtraDocument>.Filter.And(
+                Builders<ExtraDocument>.Filter.Eq(e => e.RegionID, regionID),
+                Builders<ExtraDocument>.Filter.Eq(e => e.Name, name)
+            );
+            var doc = new ExtraDocument { RegionID = regionID, Name = name, Value = val };
+            m_extraCollection.ReplaceOne(filter, doc, new ReplaceOptions { IsUpsert = true });
         }
 
         public void RemoveExtra(UUID regionID, string name)
         {
+             var filter = Builders<ExtraDocument>.Filter.And(
+                Builders<ExtraDocument>.Filter.Eq(e => e.RegionID, regionID),
+                Builders<ExtraDocument>.Filter.Eq(e => e.Name, name)
+            );
+            m_extraCollection.DeleteOne(filter);
         }
 
         public Dictionary<string, string> GetExtra(UUID regionID)
         {
-            return null;
+            var extras = m_extraCollection.Find(e => e.RegionID == regionID).ToList();
+            var result = new Dictionary<string, string>();
+            foreach (var extra in extras)
+            {
+                result[extra.Name] = extra.Value;
+            }
+            return result;
+        }
+
+        // ===================================================================
+        // Conversion helpers
+        // ===================================================================
+
+        private PrimDocument ConvertToPrimDocument(SceneObjectPart prim, UUID sceneGroupID, UUID regionUUID)
+        {
+            return new PrimDocument
+            {
+                UUID = prim.UUID,
+                RegionUUID = regionUUID,
+                CreationDate = prim.CreationDate,
+                Name = prim.Name,
+                SceneGroupID = sceneGroupID,
+                Text = prim.Text,
+                Description = prim.Description,
+                SitName = prim.SitName,
+                TouchName = prim.TouchName,
+                ObjectFlags = (uint)prim.Flags,
+                CreatorID = prim.CreatorIdentification,
+                OwnerID = prim.OwnerID,
+                GroupID = prim.GroupID,
+                LastOwnerID = prim.LastOwnerID,
+                RezzerID = prim.RezzerID,
+                OwnerMask = prim.OwnerMask,
+                NextOwnerMask = prim.NextOwnerMask,
+                GroupMask = prim.GroupMask,
+                EveryoneMask = prim.EveryoneMask,
+                BaseMask = prim.BaseMask,
+                PositionX = prim.OffsetPosition.X,
+                PositionY = prim.OffsetPosition.Y,
+                PositionZ = prim.OffsetPosition.Z,
+                GroupPositionX = prim.GroupPosition.X,
+                GroupPositionY = prim.GroupPosition.Y,
+                GroupPositionZ = prim.GroupPosition.Z,
+                VelocityX = prim.Velocity.X,
+                VelocityY = prim.Velocity.Y,
+                VelocityZ = prim.Velocity.Z,
+                AngularVelocityX = prim.AngularVelocity.X,
+                AngularVelocityY = prim.AngularVelocity.Y,
+                AngularVelocityZ = prim.AngularVelocity.Z,
+                AccelerationX = prim.Acceleration.X,
+                AccelerationY = prim.Acceleration.Y,
+                AccelerationZ = prim.Acceleration.Z,
+                RotationX = prim.RotationOffset.X,
+                RotationY = prim.RotationOffset.Y,
+                RotationZ = prim.RotationOffset.Z,
+                RotationW = prim.RotationOffset.W,
+                SitTargetOffsetX = prim.SitTargetPositionLL.X,
+                SitTargetOffsetY = prim.SitTargetPositionLL.Y,
+                SitTargetOffsetZ = prim.SitTargetPositionLL.Z,
+                SitTargetOrientW = prim.SitTargetOrientationLL.W,
+                SitTargetOrientX = prim.SitTargetOrientationLL.X,
+                SitTargetOrientY = prim.SitTargetOrientationLL.Y,
+                SitTargetOrientZ = prim.SitTargetOrientationLL.Z,
+                standtargetx = prim.StandOffset.X,
+                standtargety = prim.StandOffset.Y,
+                standtargetz = prim.StandOffset.Z,
+                sitactrange = prim.SitActiveRange,
+                ColorR = prim.Color.R,
+                ColorG = prim.Color.G,
+                ColorB = prim.Color.B,
+                ColorA = prim.Color.A,
+                PayPrice = prim.PayPrice[0],
+                PayButton1 = prim.PayPrice[1],
+                PayButton2 = prim.PayPrice[2],
+                PayButton3 = prim.PayPrice[3],
+                PayButton4 = prim.PayPrice[4],
+                TextureAnimation = Convert.ToBase64String(prim.TextureAnimation),
+                ParticleSystem = Convert.ToBase64String(prim.ParticleSystem),
+                CameraEyeOffsetX = prim.GetCameraEyeOffset().X,
+                CameraEyeOffsetY = prim.GetCameraEyeOffset().Y,
+                CameraEyeOffsetZ = prim.GetCameraEyeOffset().Z,
+                CameraAtOffsetX = prim.GetCameraAtOffset().X,
+                CameraAtOffsetY = prim.GetCameraAtOffset().Y,
+                CameraAtOffsetZ = prim.GetCameraAtOffset().Z,
+                LoopedSound = ((prim.SoundFlags & 1) != 0) ? prim.Sound.ToString() : UUID.Zero.ToString(),
+                LoopedSoundGain = ((prim.SoundFlags & 1) != 0) ? prim.SoundGain : 0.0f,
+                ForceMouselook = (short)(prim.GetForceMouselook() ? 1 : 0),
+                ScriptAccessPin = prim.ScriptAccessPin,
+                AllowedDrop = (short)(prim.AllowedDrop ? 1 : 0),
+                DieAtEdge = (short)(prim.DIE_AT_EDGE ? 1 : 0),
+                SalePrice = prim.SalePrice,
+                SaleType = (short)prim.ObjectSaleType,
+                ClickAction = prim.ClickAction,
+                Material = prim.Material,
+                CollisionSound = prim.CollisionSound.ToString(),
+                CollisionSoundVolume = prim.CollisionSoundVolume,
+                VolumeDetect = (short)(prim.VolumeDetectActive ? 1 : 0),
+                MediaURL = prim.MediaUrl,
+                AttachedPosX = prim.AttachedPos.X,
+                AttachedPosY = prim.AttachedPos.Y,
+                AttachedPosZ = prim.AttachedPos.Z,
+                DynAttrs = (prim.DynAttrs != null && prim.DynAttrs.CountNamespaces > 0) ? prim.DynAttrs.ToXml() : null,
+                PhysicsShapeType = prim.PhysicsShapeType,
+                Density = prim.Density,
+                GravityModifier = prim.GravityModifier,
+                Friction = prim.Friction,
+                Restitution = prim.Restitution,
+                KeyframeMotion = (prim.KeyframeMotion != null) ? prim.KeyframeMotion.Serialize() : Array.Empty<byte>(),
+                PassTouches = prim.PassTouches,
+                PassCollisions = prim.PassCollisions,
+                RotationAxisLocks = prim.RotationAxisLocks,
+                Vehicle = (prim.VehicleParams != null) ? prim.VehicleParams.ToXml2() : String.Empty,
+                PhysInertia = (prim.PhysicsInertia != null) ? prim.PhysicsInertia.ToXml2() : String.Empty,
+                pseudocrc = prim.PseudoCRC,
+                sopanims = prim.SerializeAnimations(),
+                lnkstBinData = (prim.IsRoot && prim.ParentGroup.LinksetData is not null) ? prim.ParentGroup.LinksetData.ToBin() : null,
+                StartStr = prim.IsRoot ? prim.ParentGroup.RezStringParameter : null
+            };
+        }
+
+        private SceneObjectPart ConvertFromPrimDocument(PrimDocument primDoc)
+        {
+            var prim = new SceneObjectPart
+            {
+                UUID = primDoc.UUID,
+                CreationDate = primDoc.CreationDate,
+                Name = primDoc.Name,
+                Text = primDoc.Text,
+                Color = Color.FromArgb(primDoc.ColorA, primDoc.ColorR, primDoc.ColorG, primDoc.ColorB),
+                Description = primDoc.Description,
+                SitName = primDoc.SitName,
+                TouchName = primDoc.TouchName,
+                Flags = (PrimFlags)primDoc.ObjectFlags,
+                CreatorIdentification = primDoc.CreatorID,
+                OwnerID = primDoc.OwnerID,
+                GroupID = primDoc.GroupID,
+                LastOwnerID = primDoc.LastOwnerID,
+                RezzerID = primDoc.RezzerID,
+                OwnerMask = primDoc.OwnerMask,
+                NextOwnerMask = primDoc.NextOwnerMask,
+                GroupMask = primDoc.GroupMask,
+                EveryoneMask = primDoc.EveryoneMask,
+                BaseMask = primDoc.BaseMask,
+                OffsetPosition = new Vector3((float)primDoc.PositionX, (float)primDoc.PositionY, (float)primDoc.PositionZ),
+                GroupPosition = new Vector3((float)primDoc.GroupPositionX, (float)primDoc.GroupPositionY, (float)primDoc.GroupPositionZ),
+                Velocity = new Vector3((float)primDoc.VelocityX, (float)primDoc.VelocityY, (float)primDoc.VelocityZ),
+                AngularVelocity = new Vector3((float)primDoc.AngularVelocityX, (float)primDoc.AngularVelocityY, (float)primDoc.AngularVelocityZ),
+                Acceleration = new Vector3((float)primDoc.AccelerationX, (float)primDoc.AccelerationY, (float)primDoc.AccelerationZ),
+                RotationOffset = new Quaternion((float)primDoc.RotationX, (float)primDoc.RotationY, (float)primDoc.RotationZ, (float)primDoc.RotationW),
+                SitTargetPositionLL = new Vector3((float)primDoc.SitTargetOffsetX, (float)primDoc.SitTargetOffsetY, (float)primDoc.SitTargetOffsetZ),
+                SitTargetOrientationLL = new Quaternion((float)primDoc.SitTargetOrientX, (float)primDoc.SitTargetOrientY, (float)primDoc.SitTargetOrientZ, (float)primDoc.SitTargetOrientW),
+                StandOffset = new Vector3(primDoc.standtargetx, primDoc.standtargety, primDoc.standtargetz),
+                SitActiveRange = primDoc.sitactrange,
+                ClickAction = primDoc.ClickAction,
+                PayPrice = new int[] { primDoc.PayPrice, primDoc.PayButton1, primDoc.PayButton2, primDoc.PayButton3, primDoc.PayButton4 },
+                Sound = new UUID(primDoc.LoopedSound),
+                SoundGain = (float)primDoc.LoopedSoundGain,
+                SoundFlags = string.IsNullOrEmpty(primDoc.LoopedSound) || new UUID(primDoc.LoopedSound).IsZero() ? 0 : 1,
+                TextureAnimation = Convert.FromBase64String(primDoc.TextureAnimation ?? ""),
+                ParticleSystem = Convert.FromBase64String(primDoc.ParticleSystem ?? ""),
+                ScriptAccessPin = primDoc.ScriptAccessPin,
+                AllowedDrop = primDoc.AllowedDrop != 0,
+                DIE_AT_EDGE = primDoc.DieAtEdge != 0,
+                SalePrice = primDoc.SalePrice,
+                ObjectSaleType = (byte)primDoc.SaleType,
+                Material = primDoc.Material,
+                CollisionSound = new UUID(primDoc.CollisionSound),
+                CollisionSoundVolume = (float)primDoc.CollisionSoundVolume,
+                VolumeDetectActive = primDoc.VolumeDetect != 0,
+                MediaUrl = primDoc.MediaURL,
+                AttachedPos = new Vector3((float)primDoc.AttachedPosX, (float)primDoc.AttachedPosY, (float)primDoc.AttachedPosZ),
+                DynAttrs = string.IsNullOrEmpty(primDoc.DynAttrs) ? null : DAMap.FromXml(primDoc.DynAttrs),
+                PhysicsShapeType = primDoc.PhysicsShapeType,
+                Density = (float)primDoc.Density,
+                GravityModifier = (float)primDoc.GravityModifier,
+                Friction = (float)primDoc.Friction,
+                Restitution = (float)primDoc.Restitution,
+                KeyframeMotion = primDoc.KeyframeMotion != null && primDoc.KeyframeMotion.Length > 0 ? KeyframeMotion.FromData(null, primDoc.KeyframeMotion) : null,
+                PassCollisions = primDoc.PassCollisions,
+                PassTouches = primDoc.PassTouches,
+                RotationAxisLocks = primDoc.RotationAxisLocks,
+                VehicleParams = string.IsNullOrEmpty(primDoc.Vehicle) ? null : SOPVehicle.FromXml2(primDoc.Vehicle),
+                PhysicsInertia = string.IsNullOrEmpty(primDoc.PhysInertia) ? null : PhysicsInertiaData.FromXml2(primDoc.PhysInertia),
+                PseudoCRC = primDoc.pseudocrc
+            };
+            prim.SetCameraEyeOffset(new Vector3((float)primDoc.CameraEyeOffsetX, (float)primDoc.CameraEyeOffsetY, (float)primDoc.CameraEyeOffsetZ));
+            prim.SetCameraAtOffset(new Vector3((float)primDoc.CameraAtOffsetX, (float)primDoc.CameraAtOffsetY, (float)primDoc.CameraAtOffsetZ));
+            prim.SetForceMouselook(primDoc.ForceMouselook != 0);
+            if(primDoc.sopanims != null)
+                prim.DeSerializeAnimations(primDoc.sopanims);
+
+            return prim;
+        }
+
+        private ShapeDocument ConvertToShapeDocument(PrimitiveBaseShape s, Guid primID)
+        {
+            return new ShapeDocument
+            {
+                UUID = primID,
+                Shape = 0, // Not used
+                ScaleX = s.Scale.X,
+                ScaleY = s.Scale.Y,
+                ScaleZ = s.Scale.Z,
+                PCode = s.PCode,
+                PathBegin = s.PathBegin,
+                PathEnd = s.PathEnd,
+                PathScaleX = s.PathScaleX,
+                PathScaleY = s.PathScaleY,
+                PathShearX = s.PathShearX,
+                PathShearY = s.PathShearY,
+                PathSkew = s.PathSkew,
+                PathCurve = s.PathCurve,
+                PathRadiusOffset = s.PathRadiusOffset,
+                PathRevolutions = s.PathRevolutions,
+                PathTaperX = s.PathTaperX,
+                PathTaperY = s.PathTaperY,
+                PathTwist = s.PathTwist,
+                PathTwistBegin = s.PathTwistBegin,
+                ProfileBegin = s.ProfileBegin,
+                ProfileEnd = s.ProfileEnd,
+                ProfileCurve = s.ProfileCurve,
+                ProfileHollow = s.ProfileHollow,
+                State = s.State,
+                LastAttachPoint = s.LastAttachPoint,
+                Texture = s.TextureEntry,
+                ExtraParams = s.ExtraParams,
+                Media = s.Media?.ToXml(),
+                MatOvrd = s.RenderMaterialsOvrToRawBin()
+            };
+        }
+
+        private PrimitiveBaseShape ConvertFromShapeDocument(ShapeDocument shapeDoc)
+        {
+            var s = new PrimitiveBaseShape
+            {
+                Scale = new Vector3((float)shapeDoc.ScaleX, (float)shapeDoc.ScaleY, (float)shapeDoc.ScaleZ),
+                PCode = (byte)shapeDoc.PCode,
+                PathBegin = (ushort)shapeDoc.PathBegin,
+                PathEnd = (ushort)shapeDoc.PathEnd,
+                PathScaleX = (byte)shapeDoc.PathScaleX,
+                PathScaleY = (byte)shapeDoc.PathScaleY,
+                PathShearX = (byte)shapeDoc.PathShearX,
+                PathShearY = (byte)shapeDoc.PathShearY,
+                PathSkew = (sbyte)shapeDoc.PathSkew,
+                PathCurve = (byte)shapeDoc.PathCurve,
+                PathRadiusOffset = (sbyte)shapeDoc.PathRadiusOffset,
+                PathRevolutions = (byte)shapeDoc.PathRevolutions,
+                PathTaperX = (sbyte)shapeDoc.PathTaperX,
+                PathTaperY = (sbyte)shapeDoc.PathTaperY,
+                PathTwist = (sbyte)shapeDoc.PathTwist,
+                PathTwistBegin = (sbyte)shapeDoc.PathTwistBegin,
+                ProfileBegin = (ushort)shapeDoc.ProfileBegin,
+                ProfileEnd = (ushort)shapeDoc.ProfileEnd,
+                ProfileCurve = (byte)shapeDoc.ProfileCurve,
+                ProfileHollow = (ushort)shapeDoc.ProfileHollow,
+                State = (byte)shapeDoc.State,
+                LastAttachPoint = (byte)shapeDoc.LastAttachPoint,
+                TextureEntry = shapeDoc.Texture,
+                ExtraParams = shapeDoc.ExtraParams,
+                Media = string.IsNullOrEmpty(shapeDoc.Media) ? null : PrimitiveBaseShape.MediaList.FromXml(shapeDoc.Media)
+            };
+            s.RenderMaterialsOvrFromRawBin(shapeDoc.MatOvrd);
+            return s;
+        }
+
+        private ItemDocument ConvertToItemDocument(TaskInventoryItem item)
+        {
+            return new ItemDocument
+            {
+                itemID = item.ItemID,
+                primID = item.ParentPartID,
+                assetID = item.AssetID,
+                parentFolderID = item.ParentID,
+                invType = item.InvType,
+                assetType = item.Type,
+                name = item.Name,
+                description = item.Description,
+                creationDate = item.CreationDate,
+                creatorID = item.CreatorIdentification,
+                ownerID = item.OwnerID,
+                lastOwnerID = item.LastOwnerID,
+                groupID = item.GroupID,
+                nextPermissions = item.NextPermissions,
+                currentPermissions = item.CurrentPermissions,
+                basePermissions = item.BasePermissions,
+                everyonePermissions = item.EveryonePermissions,
+                groupPermissions = item.GroupPermissions,
+                flags = item.Flags
+            };
+        }
+
+        private TaskInventoryItem ConvertFromItemDocument(ItemDocument doc)
+        {
+            return new TaskInventoryItem
+            {
+                ItemID = doc.itemID,
+                ParentPartID = doc.primID,
+                AssetID = doc.assetID,
+                ParentID = doc.parentFolderID,
+                InvType = doc.invType,
+                Type = doc.assetType,
+                Name = doc.name,
+                Description = doc.description,
+                CreationDate = (int)doc.creationDate,
+                CreatorIdentification = doc.creatorID,
+                OwnerID = doc.ownerID,
+                LastOwnerID = doc.lastOwnerID,
+                GroupID = doc.groupID,
+                NextPermissions = doc.nextPermissions,
+                CurrentPermissions = doc.currentPermissions,
+                BasePermissions = doc.basePermissions,
+                EveryonePermissions = doc.everyonePermissions,
+                GroupPermissions = doc.groupPermissions,
+                Flags = doc.flags
+            };
+        }
+
+        private LandDocument ConvertToLandDocument(LandData land, UUID regionUUID)
+        {
+            return new LandDocument
+            {
+                UUID = land.GlobalID,
+                RegionUUID = regionUUID,
+                LocalLandID = land.LocalID,
+                Bitmap = land.Bitmap,
+                Name = land.Name,
+                Desc = land.Description,
+                OwnerUUID = land.OwnerID,
+                IsGroupOwned = land.IsGroupOwned,
+                Area = land.Area,
+                AuctionID = land.AuctionID,
+                Category = (int)land.Category,
+                ClaimDate = land.ClaimDate,
+                ClaimPrice = land.ClaimPrice,
+                GroupUUID = land.GroupID,
+                SalePrice = land.SalePrice,
+                LandStatus = (int)land.Status,
+                LandFlags = land.Flags,
+                LandingType = land.LandingType,
+                MediaAutoScale = land.MediaAutoScale,
+                MediaTextureUUID = land.MediaID,
+                MediaURL = land.MediaURL,
+                MusicURL = land.MusicURL,
+                PassHours = land.PassHours,
+                PassPrice = (uint)land.PassPrice,
+                SnapshotUUID = land.SnapshotID,
+                UserLocationX = land.UserLocation.X,
+                UserLocationY = land.UserLocation.Y,
+                UserLocationZ = land.UserLocation.Z,
+                UserLookAtX = land.UserLookAt.X,
+                UserLookAtY = land.UserLookAt.Y,
+                UserLookAtZ = land.UserLookAt.Z,
+                AuthbuyerID = land.AuthBuyerID,
+                OtherCleanTime = land.OtherCleanTime,
+                Dwell = land.Dwell,
+                MediaType = land.MediaType,
+                MediaDescription = land.MediaDescription,
+                MediaSize = $"{land.MediaWidth},{land.MediaHeight}",
+                MediaLoop = land.MediaLoop,
+                ObscureMedia = land.ObscureMedia,
+                ObscureMusic = land.ObscureMusic,
+                SeeAVs = land.SeeAVs,
+                AnyAVSounds = land.AnyAVSounds,
+                GroupAVSounds = land.GroupAVSounds,
+                environment = land.Environment != null ? ViewerEnvironment.ToOSDString(land.Environment) : ""
+            };
+        }
+
+        private LandData ConvertFromLandDocument(LandDocument doc)
+        {
+            var landData = new LandData
+            {
+                GlobalID = doc.UUID,
+                LocalID = doc.LocalLandID,
+                Bitmap = doc.Bitmap,
+                Name = doc.Name,
+                Description = doc.Desc,
+                OwnerID = doc.OwnerUUID,
+                IsGroupOwned = doc.IsGroupOwned,
+                Area = doc.Area,
+                AuctionID = (uint)doc.AuctionID,
+                Category = (ParcelCategory)doc.Category,
+                ClaimDate = doc.ClaimDate,
+                ClaimPrice = doc.ClaimPrice,
+                GroupID = doc.GroupUUID,
+                SalePrice = doc.SalePrice,
+                Status = (ParcelStatus)doc.LandStatus,
+                Flags = doc.LandFlags,
+                LandingType = doc.LandingType,
+                MediaAutoScale = doc.MediaAutoScale,
+                MediaID = doc.MediaTextureUUID,
+                MediaURL = doc.MediaURL,
+                MusicURL = doc.MusicURL,
+                PassHours = doc.PassHours,
+                PassPrice = (int)doc.PassPrice,
+                SnapshotID = doc.SnapshotUUID,
+                UserLocation = new Vector3((float)doc.UserLocationX, (float)doc.UserLocationY, (float)doc.UserLocationZ),
+                UserLookAt = new Vector3((float)doc.UserLookAtX, (float)doc.UserLookAtY, (float)doc.UserLookAtZ),
+                AuthBuyerID = doc.AuthbuyerID,
+                OtherCleanTime = doc.OtherCleanTime,
+                Dwell = doc.Dwell,
+                MediaType = doc.MediaType,
+                MediaDescription = doc.MediaDescription,
+                MediaLoop = doc.MediaLoop,
+                ObscureMedia = doc.ObscureMedia,
+                ObscureMusic = doc.ObscureMusic,
+                SeeAVs = doc.SeeAVs,
+                AnyAVSounds = doc.AnyAVSounds,
+                GroupAVSounds = doc.GroupAVSounds
+            };
+
+            if (!string.IsNullOrEmpty(doc.MediaSize))
+            {
+                string[] sizes = doc.MediaSize.Split(',');
+                if (sizes.Length == 2)
+                {
+                    int.TryParse(sizes[0], out landData.MediaWidth);
+                    int.TryParse(sizes[1], out landData.MediaHeight);
+                }
+            }
+            
+            if(!string.IsNullOrEmpty(doc.environment))
+            {
+                var venv = new ViewerEnvironment();
+                venv.FromOSDString(doc.environment);
+                landData.Environment = venv;
+            }
+
+            return landData;
+        }
+
+        private LandAccessDocument ConvertToLandAccessDocument(LandAccessEntry entry, UUID landID)
+        {
+            return new LandAccessDocument
+            {
+                LandUUID = landID,
+                AccessUUID = entry.AgentID,
+                Flags = (uint)entry.Flags
+            };
+        }
+
+        private LandAccessEntry ConvertFromLandAccessDocument(LandAccessDocument doc)
+        {
+            return new LandAccessEntry
+            {
+                AgentID = doc.AccessUUID,
+                Flags = (AccessList)doc.Flags,
+                Expires = 0
+            };
+        }
+
+        private RegionSettingsDocument ConvertToRegionSettingsDocument(RegionSettings settings)
+        {
+            return new RegionSettingsDocument
+            {
+                regionUUID = settings.RegionUUID,
+                block_terraform = settings.BlockTerraform ? 1 : 0,
+                block_fly = settings.BlockFly ? 1 : 0,
+                allow_damage = settings.AllowDamage ? 1 : 0,
+                restrict_pushing = settings.RestrictPushing ? 1 : 0,
+                allow_land_resell = settings.AllowLandResell ? 1 : 0,
+                allow_land_join_divide = settings.AllowLandJoinDivide ? 1 : 0,
+                block_show_in_search = settings.BlockShowInSearch ? 1 : 0,
+                agent_limit = settings.AgentLimit,
+                object_bonus = settings.ObjectBonus,
+                maturity = settings.Maturity,
+                disable_scripts = settings.DisableScripts ? 1 : 0,
+                disable_collisions = settings.DisableCollisions ? 1 : 0,
+                disable_physics = settings.DisablePhysics ? 1 : 0,
+                terrain_texture_1 = settings.TerrainTexture1.ToString(),
+                terrain_texture_2 = settings.TerrainTexture2.ToString(),
+                terrain_texture_3 = settings.TerrainTexture3.ToString(),
+                terrain_texture_4 = settings.TerrainTexture4.ToString(),
+                TerrainPBR1 = settings.TerrainPBR1.ToString(),
+                TerrainPBR2 = settings.TerrainPBR2.ToString(),
+                TerrainPBR3 = settings.TerrainPBR3.ToString(),
+                TerrainPBR4 = settings.TerrainPBR4.ToString(),
+                elevation_1_nw = settings.Elevation1NW,
+                elevation_2_nw = settings.Elevation2NW,
+                elevation_1_ne = settings.Elevation1NE,
+                elevation_2_ne = settings.Elevation2NE,
+                elevation_1_se = settings.Elevation1SE,
+                elevation_2_se = settings.Elevation2SE,
+                elevation_1_sw = settings.Elevation1SW,
+                elevation_2_sw = settings.Elevation2SW,
+                water_height = settings.WaterHeight,
+                terrain_raise_limit = settings.TerrainRaiseLimit,
+                terrain_lower_limit = settings.TerrainLowerLimit,
+                use_estate_sun = settings.UseEstateSun ? 1 : 0,
+                sandbox = settings.Sandbox ? 1 : 0,
+                sunvectorx = settings.SunVector.X,
+                sunvectory = settings.SunVector.Y,
+                sunvectorz = settings.SunVector.Z,
+                fixed_sun = settings.FixedSun ? 1 : 0,
+                sun_position = settings.SunPosition,
+                covenant = settings.Covenant.ToString(),
+                covenant_datetime = settings.CovenantChangedDateTime,
+                map_tile_ID = settings.TerrainImageID.ToString(),
+                TelehubObject = settings.TelehubObject.ToString(),
+                parcel_tile_ID = settings.ParcelImageID.ToString(),
+                block_search = settings.GodBlockSearch,
+                casino = settings.Casino,
+                cacheID = settings.CacheID.ToString()
+            };
+        }
+
+        private RegionSettings ConvertFromRegionSettingsDocument(RegionSettingsDocument doc)
+        {
+            var settings = new RegionSettings(doc.regionUUID)
+            {
+                BlockTerraform = doc.block_terraform != 0,
+                BlockFly = doc.block_fly != 0,
+                AllowDamage = doc.allow_damage != 0,
+                RestrictPushing = doc.restrict_pushing != 0,
+                AllowLandResell = doc.allow_land_resell != 0,
+                AllowLandJoinDivide = doc.allow_land_join_divide != 0,
+                BlockShowInSearch = doc.block_show_in_search != 0,
+                AgentLimit = doc.agent_limit,
+                ObjectBonus = doc.object_bonus,
+                Maturity = doc.maturity,
+                DisableScripts = doc.disable_scripts != 0,
+                DisableCollisions = doc.disable_collisions != 0,
+                DisablePhysics = doc.disable_physics != 0,
+                TerrainTexture1 = new UUID(doc.terrain_texture_1),
+                TerrainTexture2 = new UUID(doc.terrain_texture_2),
+                TerrainTexture3 = new UUID(doc.terrain_texture_3),
+                TerrainTexture4 = new UUID(doc.terrain_texture_4),
+                TerrainPBR1 = new UUID(doc.TerrainPBR1),
+                TerrainPBR2 = new UUID(doc.TerrainPBR2),
+                TerrainPBR3 = new UUID(doc.TerrainPBR3),
+                TerrainPBR4 = new UUID(doc.TerrainPBR4),
+                Elevation1NW = doc.elevation_1_nw,
+                Elevation2NW = doc.elevation_2_nw,
+                Elevation1NE = doc.elevation_1_ne,
+                Elevation2NE = doc.elevation_2_ne,
+                Elevation1SE = doc.elevation_1_se,
+                Elevation2SE = doc.elevation_2_se,
+                Elevation1SW = doc.elevation_1_sw,
+                Elevation2SW = doc.elevation_2_sw,
+                WaterHeight = doc.water_height,
+                TerrainRaiseLimit = doc.terrain_raise_limit,
+                TerrainLowerLimit = doc.terrain_lower_limit,
+                UseEstateSun = doc.use_estate_sun != 0,
+                Sandbox = doc.sandbox != 0,
+                SunVector = new Vector3((float)doc.sunvectorx, (float)doc.sunvectory, (float)doc.sunvectorz),
+                FixedSun = doc.fixed_sun != 0,
+                SunPosition = doc.sun_position,
+                Covenant = new UUID(doc.covenant),
+                CovenantChangedDateTime = doc.covenant_datetime,
+                TerrainImageID = new UUID(doc.map_tile_ID),
+                TelehubObject = new UUID(doc.TelehubObject),
+                ParcelImageID = new UUID(doc.parcel_tile_ID),
+                GodBlockSearch = doc.block_search,
+                Casino = doc.casino,
+                CacheID = new UUID(doc.cacheID)
+            };
+            return settings;
         }
     }
 }

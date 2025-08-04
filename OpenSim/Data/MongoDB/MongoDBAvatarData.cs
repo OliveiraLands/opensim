@@ -53,19 +53,5 @@ namespace OpenSim.Data.MongoDB
         public bool Delete(UUID principalID, string name)
         {
             return base.Delete("PrincipalID", principalID.ToString());
-            /*
-            using (MongoDBCommand cmd = new MongoDBCommand())
-            {
-                cmd.CommandText = String.Format("delete from {0} where `PrincipalID` = :PrincipalID and `Name` = :Name", m_Realm);
-                cmd.Parameters.AddWithValue(":PrincipalID", principalID.ToString());
-                cmd.Parameters.AddWithValue(":Name", name);
-
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
-            }
-            return false;
-            */
         }
-
-    }
 }

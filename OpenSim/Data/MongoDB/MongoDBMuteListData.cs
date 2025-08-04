@@ -54,16 +54,22 @@ namespace OpenSim.Data.MongoDB
 
         public bool Delete(UUID agentID, UUID muteID, string muteName)
         {
-            using (MongoDBCommand cmd = new MongoDBCommand())
+            try
             {
-                cmd.CommandText = "delete from MuteList where `AgentID` = :AgentID and `MuteID` = :MuteID and `MuteName` = :MuteName";
+                var filter = Builders<MuteData>.Filter.And(
+                    Builders<MuteData>.Filter.Eq(m => m.AgentID, agentID),
+                    Builders<MuteData>.Filter.Eq(m => m.MuteID, muteID),
+                    Builders<MuteData>.Filter.Eq(m => m.MuteName, muteName)
+                );
 
-                cmd.Parameters.AddWithValue(":AgentID", agentID.ToString());
-                cmd.Parameters.AddWithValue(":MuteID", muteID.ToString());
-                cmd.Parameters.AddWithValue(":MuteName", muteName);
+                var deleteResult = Collection.DeleteOne(filter);
 
-                if (ExecuteNonQuery(cmd, m_Connection) > 0)
-                    return true;
+                return deleteResult.IsAcknowledged && deleteResult.DeletedCount > 0;
+            }
+            catch (Exception e)
+            {
+                // Log the exception if necessary
+                // m_log.ErrorFormat("[MUTE LIST DB]: Error deleting mute data: {0}", e.Message);
                 return false;
             }
         }

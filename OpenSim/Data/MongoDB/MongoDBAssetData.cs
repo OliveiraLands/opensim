@@ -96,7 +96,7 @@ namespace OpenSim.Data.MongoDB
                     var propInfo = typeof(AssetBase).GetProperty("ID", BindingFlags.Public | BindingFlags.Instance);
 
                     if (propInfo == null)
-                        throw new InvalidOperationException($"A propriedade 'ID' não existe na classe '{typeof(AssetBase).Name}'.");
+                        throw new InvalidOperationException($"A propriedade 'ID' nï¿½o existe na classe '{typeof(AssetBase).Name}'.");
 
                     // Mapeia a propriedade como Id
                     cm.MapIdMember(propInfo)
@@ -192,31 +192,31 @@ namespace OpenSim.Data.MongoDB
             // Converte os UUIDs para strings (ajuste se for GUID ou outro tipo no MongoDB)
             var stringUuids = uuids.Select(u => u.ToString()).ToArray();
 
-            // Chama a rotina genérica
+            // Chama a rotina genï¿½rica
             return m_assetbase.ItemsExist<AssetBase>(stringUuids, a => a.FullID, _collection);
 
             /*
             if (uuids.Length == 0)
                 return new bool[0];
 
-            // Converte os UUIDs para a representação de string ou Guid esperada no MongoDB
+            // Converte os UUIDs para a representaï¿½ï¿½o de string ou Guid esperada no MongoDB
             var stringUuids = uuids.Select(u => u.ToString()).ToList(); // Ajuste aqui conforme o tipo real de UUID
 
-            // Cria um filtro para buscar documentos onde o campo 'Id' (mapeado de UUID) está na lista de stringUuids
+            // Cria um filtro para buscar documentos onde o campo 'Id' (mapeado de UUID) estï¿½ na lista de stringUuids
             var filter = Builders<AssetBase>.Filter.In(a => a.FullID.ToString(), stringUuids);
 
             // Projeta apenas o campo Id para reduzir a quantidade de dados transferidos
             var projection = Builders<AssetBase>.Projection.Include(a => a.FullID);
 
-            // Busca no MongoDB e obtém os IDs existentes
+            // Busca no MongoDB e obtï¿½m os IDs existentes
             var existingAssetsIds = _collection
                 .Find(filter)
                 .Project(projection)
                 .ToList();
 
             // Converte a lista de BsonDocuments para HashSet de UUIDs para busca eficiente
-            // Se o Id é um ObjectId em BsonType.ObjectId, você precisará de conversão adicional.
-            // Se é string ou Guid, a conversão é mais direta.
+            // Se o Id ï¿½ um ObjectId em BsonType.ObjectId, vocï¿½ precisarï¿½ de conversï¿½o adicional.
+            // Se ï¿½ string ou Guid, a conversï¿½o ï¿½ mais direta.
             var existingUuidsInDb = new HashSet<string>(existingAssetsIds.Select(doc => doc["_id"].AsString)); // Ajustar conforme o tipo de _id no DB
 
             bool[] results = new bool[uuids.Count()];
@@ -231,50 +231,7 @@ namespace OpenSim.Data.MongoDB
             */
         }
 
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="row"></param>
-        /// <returns></returns>
-        private static AssetBase buildAsset(IDataReader row)
-        {
-            // TODO: this doesn't work yet because something more
-            // interesting has to be done to actually get these values
-            // back out.  Not enough time to figure it out yet.
-            AssetBase asset = new AssetBase(
-                new UUID((String)row["UUID"]),
-                (String)row["Name"],
-                Convert.ToSByte(row["Type"]),
-                (String)row["CreatorID"]
-            );
-
-            asset.Description = (String) row["Description"];
-            asset.Local = Convert.ToBoolean(row["Local"]);
-            asset.Temporary = Convert.ToBoolean(row["Temporary"]);
-            asset.Flags = (AssetFlags)Convert.ToInt32(row["asset_flags"]);
-            asset.Data = (byte[])row["Data"];
-            asset.Hash = (row["hash"] == DBNull.Value ? "" : (string)row["hash"]);
-            return asset;
-        }
-
-        private static AssetMetadata buildAssetMetadata(IDataReader row)
-        {
-            AssetMetadata metadata = new AssetMetadata();
-
-            metadata.FullID = new UUID((string) row["UUID"]);
-            metadata.Name = (string) row["Name"];
-            metadata.Description = (string) row["Description"];
-            metadata.Type = Convert.ToSByte(row["Type"]);
-            metadata.Temporary = Convert.ToBoolean(row["Temporary"]); // Not sure if this is correct.
-            metadata.Flags = (AssetFlags)Convert.ToInt32(row["asset_flags"]);
-            metadata.CreatorID = row["CreatorID"].ToString();
-            metadata.Hash = (row["hash"] == DBNull.Value ? "" : (string)row["hash"]);
-
-            // Current SHA1s are not stored/computed.
-            metadata.SHA1 = Array.Empty<byte>();
-
-            return metadata;
-        }
+        
 
         /// <summary>
         /// Returns a list of AssetMetadata objects. The list is a subset of
@@ -296,10 +253,10 @@ namespace OpenSim.Data.MongoDB
                 // Define um filtro vazio para retornar todos os documentos
                 var filter = Builders<AssetBase>.Filter.Empty;
 
-                // Cria a lista de metadados de forma assíncrona
+                // Cria a lista de metadados de forma assï¿½ncrona
                retList = _collection.Find(filter)
                                              .Skip(start) // Pula os primeiros 'start' documentos
-                                             .Limit(count) // Limita o resultado aos próximos 'count' documentos
+                                             .Limit(count) // Limita o resultado aos prï¿½ximos 'count' documentos
                                              .Project(assetBase => new AssetMetadata
                                              {
                                                  FullID = assetBase.FullID,
@@ -352,7 +309,8 @@ namespace OpenSim.Data.MongoDB
         /// </summary>
         override public void Initialise()
         {
-            throw new NotImplementedException();
+            m_log.WarnFormat("[ASSET DB]: Initialise() called without a connection string. Falling back to default: mongodb://localhost:27017");
+            Initialise("mongodb://localhost:27017");
         }
 
         /// <summary>
@@ -377,10 +335,10 @@ namespace OpenSim.Data.MongoDB
                 /*
                 var filter = Builders<AssetBase>.Filter.Eq(a => a.FullID.ToString(), uuid.ToString());
 
-                // Executa a operação de exclusão de um único documento
+                // Executa a operaï¿½ï¿½o de exclusï¿½o de um ï¿½nico documento
                 var result = _collection.DeleteOneAsync(filter).Result;
 
-                // Retorna true se um documento foi excluído (DeletedCount > 0)
+                // Retorna true se um documento foi excluï¿½do (DeletedCount > 0)
                 return result.DeletedCount > 0;
                 */
             }
