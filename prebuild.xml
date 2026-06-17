@@ -601,11 +601,13 @@
       <Configuration name="Debug">
         <Options>
           <OutputPath>../../../bin/</OutputPath>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../../bin/</OutputPath>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
 
