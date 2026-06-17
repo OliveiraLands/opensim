@@ -1,0 +1,5 @@
+<Project>
+  <Target Name="CopyAWSSDKDlls" AfterTargets="Build">
+    <Copy SourceFiles="@(ReferencePath)" DestinationFolder="$(OutputPath)" Condition="$([System.String]::new('%(FileName)').StartsWith('AWSSDK'))" />
+  </Target>
+</Project>
