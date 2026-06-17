@@ -15,7 +15,7 @@ using System.Reflection;
 namespace OpenSim.Services.AdvancedAssetService
 {
     public class PackFileIndexEntry { public string Hash; public long Offset; public int Length; public int PackFileID; }
-    public class AssetMetadataRecord { public string UUID; public string Hash; public sbyte Type; public string Name; public long Created; }
+    public class AssetMetadataRecord { public string UUID; public string Hash; public sbyte Type; public string Name; public long Created; public bool Synced; }
     
     public class AssetWriteOp
     {
@@ -71,14 +71,17 @@ namespace OpenSim.Services.AdvancedAssetService
                 if (!exists)
                 {
                     ExecuteNonQuery("CREATE TABLE index_assets (hash TEXT PRIMARY KEY, pack_id INTEGER, offset INTEGER, length INTEGER)");
-                    ExecuteNonQuery("CREATE TABLE asset_map (uuid TEXT PRIMARY KEY COLLATE NOCASE, hash TEXT, type INTEGER, name TEXT, created INTEGER)");
+                    ExecuteNonQuery("CREATE TABLE asset_map (uuid TEXT PRIMARY KEY COLLATE NOCASE, hash TEXT, type INTEGER, name TEXT, created INTEGER, synced INTEGER DEFAULT 0)");
                     ExecuteNonQuery("CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT)");
                     ExecuteNonQuery("INSERT INTO config (key, value) VALUES ('current_pack_id', '0')");
+                    ExecuteNonQuery("CREATE INDEX idx_asset_sync ON asset_map(synced)");
                 }
                 else
                 {
-                    // Migration for 'created' column
+                    // Migration for 'created' and 'synced' columns
                     try { ExecuteNonQuery("ALTER TABLE asset_map ADD COLUMN created INTEGER DEFAULT 0"); } catch { }
+                    try { ExecuteNonQuery("ALTER TABLE asset_map ADD COLUMN synced INTEGER DEFAULT 0"); } catch { }
+                    try { ExecuteNonQuery("CREATE INDEX idx_asset_sync ON asset_map(synced)"); } catch { }
                 }
                 LoadConfig();
             }
@@ -176,7 +179,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     lock (m_Lock)
                     {
                         QueueUpdate(cmd => {
-                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created) VALUES (?, ?, ?, ?, ?)";
+                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
                             cmd.Parameters.Clear();
                             cmd.Parameters.AddWithValue(null, nid); 
                             cmd.Parameters.AddWithValue(null, hash);
@@ -292,7 +295,7 @@ namespace OpenSim.Services.AdvancedAssetService
                         string hash = ComputeHash(br.ReadBytes(dataLen));
                         
                         using (var cmd = m_Connection.CreateCommand()) {
-                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created) VALUES (?, ?, ?, ?, ?)";
+                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
                             cmd.Parameters.AddWithValue(null, uuid);
                             cmd.Parameters.AddWithValue(null, hash);
                             cmd.Parameters.AddWithValue(null, (int)type);
@@ -343,7 +346,36 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 using (var cmd = m_Connection.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT uuid, hash, type, name, created FROM asset_map";
+                    cmd.CommandText = "SELECT uuid, hash, type, name, created, synced FROM asset_map";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            results.Add(new AssetMetadataRecord
+                            {
+                                UUID = reader.GetString(0),
+                                Hash = reader.GetString(1),
+                                Type = (sbyte)reader.GetInt32(2),
+                                Name = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                                Created = reader.GetInt64(4),
+                                Synced = reader.GetInt32(5) != 0
+                            });
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+
+        public List<AssetMetadataRecord> GetUnsyncedAssets(int limit)
+        {
+            List<AssetMetadataRecord> results = new List<AssetMetadataRecord>();
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT uuid, hash, type, name, created FROM asset_map WHERE synced = 0 LIMIT :limit";
+                    cmd.Parameters.AddWithValue(":limit", limit);
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
@@ -363,6 +395,17 @@ namespace OpenSim.Services.AdvancedAssetService
             return results;
         }
 
+        public void MarkAsSynced(string uuid)
+        {
+            string nid = NormalizeUUID(uuid);
+            QueueUpdate(cmd => {
+                cmd.CommandText = "UPDATE asset_map SET synced = 1 WHERE uuid = ?";
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue(null, nid);
+                cmd.ExecuteNonQuery();
+            });
+        }
+
         private string ComputeHash(byte[] data)
         {
             using (SHA256 sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "").ToLower();
@@ -372,14 +415,15 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             using (var cmd = m_Connection.CreateCommand())
             {
-                cmd.CommandText = "SELECT hash, type, name, created FROM asset_map WHERE uuid = :uuid";
+                cmd.CommandText = "SELECT hash, type, name, created, synced FROM asset_map WHERE uuid = :uuid";
                 cmd.Parameters.AddWithValue(":uuid", uuid);
                 using (var reader = cmd.ExecuteReader())
                     if (reader.Read()) return new AssetMetadataRecord { 
                         Hash = reader.GetString(0), 
                         Type = (sbyte)reader.GetInt32(1), 
                         Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                        Created = reader.GetInt64(3)
+                        Created = reader.GetInt64(3),
+                        Synced = reader.GetInt32(4) != 0
                     };
             }
             return null;
@@ -405,6 +449,143 @@ namespace OpenSim.Services.AdvancedAssetService
             if (m_Connection != null) { m_Connection.Close(); m_Connection.Dispose(); m_Connection = null; }
         }
 
-        public void VerifyIntegrity(Action<string> p) { /* Implementation logic here */ }
+        public void VerifyIntegrity(Action<string> output)
+        {
+            output("Starting AdvancedAssetService Integrity Verification...");
+            FlushBatch();
+
+            int totalAssets = 0;
+            int missingPacks = 0;
+            int corruptedAssets = 0;
+            int validAssets = 0;
+            int missingLinks = 0;
+
+            lock (m_Lock)
+            {
+                // 1. Verify Links (asset_map -> index_assets)
+                output("Phase 1: Verifying database links...");
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COUNT(*) FROM asset_map WHERE hash NOT IN (SELECT hash FROM index_assets)";
+                    missingLinks = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+                    if (missingLinks > 0)
+                        output($"[WARNING] Found {missingLinks} UUIDs pointing to missing data hashes.");
+                    else
+                        output("All UUID links are valid.");
+                }
+
+                // 2. Verify Hashes and physical data
+                output("Phase 2: Verifying physical data integrity...");
+                List<PackFileIndexEntry> entries = new List<PackFileIndexEntry>();
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT hash, pack_id, offset, length FROM index_assets";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            entries.Add(new PackFileIndexEntry
+                            {
+                                Hash = reader.GetString(0),
+                                PackFileID = reader.GetInt32(1),
+                                Offset = reader.GetInt64(2),
+                                Length = reader.GetInt32(3)
+                            });
+                        }
+                    }
+                }
+
+                totalAssets = entries.Count;
+                output($"Total unique data blocks (Hashes) to verify: {totalAssets}");
+
+                Dictionary<int, FileStream> openPacks = new Dictionary<int, FileStream>();
+
+                try
+                {
+                    int processed = 0;
+                    foreach (var entry in entries)
+                    {
+                        processed++;
+                        if (processed % 1000 == 0) output($"Verified {processed} / {totalAssets}...");
+
+                        if (!openPacks.TryGetValue(entry.PackFileID, out FileStream fs))
+                        {
+                            string packPath = Path.Combine(m_BasePath, $"pack_{entry.PackFileID}.bin");
+                            if (!File.Exists(packPath))
+                            {
+                                missingPacks++;
+                                output($"[ERROR] Pack file missing: {packPath}");
+                                continue;
+                            }
+                            fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                            openPacks[entry.PackFileID] = fs;
+                        }
+
+                        try
+                        {
+                            using (BinaryReader br = new BinaryReader(fs, Encoding.UTF8, true))
+                            {
+                                fs.Seek(entry.Offset, SeekOrigin.Begin);
+                                if (br.ReadUInt32() != MAGIC_NUMBER)
+                                {
+                                    corruptedAssets++;
+                                    output($"[ERROR] Invalid magic number at offset {entry.Offset} in pack {entry.PackFileID} (Hash: {entry.Hash})");
+                                    continue;
+                                }
+
+                                ushort version = br.ReadUInt16();
+                                br.ReadBytes(16); // UUID
+                                br.ReadSByte(); // Type
+                                if (version >= 2) br.ReadInt64(); // Created
+                                
+                                // Name string was written as: ushort (length) + bytes
+                                ushort nameLen = br.ReadUInt16();
+                                br.ReadBytes(nameLen); // Skip Name
+                                
+                                int dataLen = br.ReadInt32();
+                                if (dataLen != entry.Length)
+                                {
+                                    corruptedAssets++;
+                                    output($"[ERROR] Length mismatch for Hash: {entry.Hash}");
+                                    continue;
+                                }
+
+                                byte[] data = br.ReadBytes(dataLen);
+                                string computedHash = ComputeHash(data);
+                                if (computedHash != entry.Hash)
+                                {
+                                    corruptedAssets++;
+                                    output($"[ERROR] Hash mismatch! Expected {entry.Hash}, got {computedHash}");
+                                }
+                                else
+                                {
+                                    validAssets++;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            corruptedAssets++;
+                            output($"[ERROR] Read error for Hash {entry.Hash}: {ex.Message}");
+                        }
+                    }
+                }
+                finally
+                {
+                    foreach (var fs in openPacks.Values) fs.Dispose();
+                }
+            }
+
+            output("--- Verification Summary ---");
+            output($"Total Data Blocks: {totalAssets}");
+            output($"Valid Blocks:      {validAssets}");
+            output($"Missing Packs:     {missingPacks}");
+            output($"Corrupted Blocks:  {corruptedAssets}");
+            output($"Broken UUID Links: {missingLinks}");
+            if (corruptedAssets == 0 && missingPacks == 0 && missingLinks == 0)
+                output("STATUS: PERFECT. No issues found.");
+            else
+                output("STATUS: ISSUES DETECTED.");
+        }
     }
 }

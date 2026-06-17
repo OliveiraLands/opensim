@@ -1403,6 +1403,7 @@
       <Reference name="OpenSim.Services.Interfaces"/>
       <Reference name="OpenSim.Data"/>
       <Reference name="OpenSim.Data.MySQL"/>
+      <Reference name="System.Data.SQLite"/>
       <Reference name="Ionic.Zip"/>
       <Reference name="MySql.Data"/>
 

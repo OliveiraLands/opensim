@@ -15,6 +15,7 @@ using OpenSim.Services.Base;
 using OpenSim.Services.Interfaces;
 using System.IO.Compression;
 using OpenSim.Data;
+using System.Timers;
 
 namespace OpenSim.Services.AdvancedAssetService
 {
@@ -27,6 +28,9 @@ namespace OpenSim.Services.AdvancedAssetService
         protected bool m_VerifyOnRead = true;
         
         private PackFileManager m_PackManager;
+        private IFSAssetDataPlugin m_GridConnector;
+        private Timer m_SyncTimer;
+        private bool m_IsSyncing = false;
 
         public AdvancedAssetService(IConfigSource config) : this(config, "AssetService")
         {
@@ -43,6 +47,25 @@ namespace OpenSim.Services.AdvancedAssetService
 
             // Initialize Pack Manager
             m_PackManager = new PackFileManager(m_StoragePath);
+
+            // Initialize Grid Connector (Shadow Sync)
+            string dllName = assetConfig.GetString("StorageProvider", string.Empty);
+            string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
+            string realm = assetConfig.GetString("Realm", "fsassets");
+
+            if (!string.IsNullOrEmpty(dllName) && !string.IsNullOrEmpty(connectionString))
+            {
+                m_log.Info("[ADVANCED ASSET SERVICE]: Shadow Sync enabled to " + connectionString);
+                m_GridConnector = LoadPlugin<IFSAssetDataPlugin>(dllName);
+                if (m_GridConnector != null)
+                {
+                    m_GridConnector.Initialise(connectionString, realm, 0);
+                    m_SyncTimer = new Timer(30000); // Sync every 30 seconds
+                    m_SyncTimer.AutoReset = true;
+                    m_SyncTimer.Elapsed += (s, e) => ProcessShadowSync();
+                    m_SyncTimer.Start();
+                }
+            }
 
             // Setup Fallback Service
             string fallback = assetConfig.GetString("FallbackService", string.Empty);
@@ -202,14 +225,26 @@ namespace OpenSim.Services.AdvancedAssetService
             }
 
             string[] files = Directory.GetFiles(path, "*.gz", SearchOption.AllDirectories);
-            MainConsole.Instance.Output($"Found {files.Length} legacy assets to import.");
+            MainConsole.Instance.Output($"Found {files.Length} assets to import.");
 
             int count = 0;
             foreach (string file in files)
             {
                 try
                 {
-                    string hash = Path.GetFileNameWithoutExtension(file);
+                    string filename = Path.GetFileNameWithoutExtension(file);
+                    sbyte type = (sbyte)AssetType.Unknown;
+                    string assetID = filename;
+
+                    // Handle format: UUID.type.gz or Hash.gz
+                    if (filename.Contains("."))
+                    {
+                        string[] parts = filename.Split('.');
+                        assetID = parts[0];
+                        if (sbyte.TryParse(parts[1], out sbyte t))
+                            type = t;
+                    }
+
                     byte[] data;
                     using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read))
                     using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
@@ -219,12 +254,17 @@ namespace OpenSim.Services.AdvancedAssetService
                         data = ms.ToArray();
                     }
 
-                    // For legacy import without DB, we use Hash as Name and generate a UUID if hash is not a UUID
-                    string assetID = hash;
-                    if (!UUID.TryParse(hash, out UUID id))
-                        assetID = UUID.Random().ToString();
+                    // If it's a Hash (64 chars hex), we use it as ID if no UUID is present
+                    // In a real FSAsset restoration, you'd want to restore the SQL DB too.
+                    if (!UUID.TryParse(assetID, out UUID id))
+                    {
+                        // It's a hash or invalid ID. 
+                        // To preserve links, the original UUID MUST be used.
+                        // If we only have the hash, we use it as ID (OpenSim will handle it if the caller knows this ID)
+                        m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Importing by content hash: {0}", assetID);
+                    }
 
-                    m_PackManager.StoreAssetData(assetID, data, (sbyte)AssetType.Unknown, "Legacy Import " + hash);
+                    m_PackManager.StoreAssetData(assetID, data, type, "Legacy Import " + assetID);
                     count++;
                     if (count % 100 == 0) MainConsole.Instance.Output($"Imported {count}...");
                 }
@@ -247,46 +287,68 @@ namespace OpenSim.Services.AdvancedAssetService
             if (!Directory.Exists(basePath)) Directory.CreateDirectory(basePath);
 
             var assets = m_PackManager.GetAllAssets();
-            MainConsole.Instance.Output($"Exporting {assets.Count} assets to legacy format...");
+            MainConsole.Instance.Output($"Exporting {assets.Count} assets to FSAsset compatible format (Hash.gz)...");
 
             int count = 0;
-            foreach (var meta in assets)
+            HashSet<string> exportedHashes = new HashSet<string>();
+            
+            string sqlPath = Path.Combine(basePath, "metadata.sql");
+            using (StreamWriter sw = new StreamWriter(sqlPath))
             {
-                try
+                sw.WriteLine("-- AdvancedAssetService Metadata Export");
+                sw.WriteLine("-- Use this to reconstruct the 'fsassets' or 'assets' table in MySQL/PostgreSQL");
+                sw.WriteLine("");
+
+                foreach (var meta in assets)
                 {
-                    byte[] data = m_PackManager.GetAssetData(meta.UUID, out _, out _);
-                    if (data == null) continue;
-
-                    string relPath = HashToPath(meta.Hash);
-                    string fullPath = Path.Combine(basePath, relPath);
-                    Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
-
-                    using (FileStream fs = new FileStream(fullPath + ".gz", FileMode.Create))
-                    using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                    try
                     {
-                        gz.Write(data, 0, data.Length);
+                        // 1. Physical Export (Deduplicated)
+                        if (!exportedHashes.Contains(meta.Hash))
+                        {
+                            byte[] data = m_PackManager.GetAssetData(meta.UUID, out _, out _);
+                            if (data != null)
+                            {
+                                string relPath = HashToPath(meta.Hash);
+                                string fullPath = Path.Combine(basePath, "data", relPath + ".gz");
+                                Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
+
+                                using (FileStream fs = new FileStream(fullPath, FileMode.Create))
+                                using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                                {
+                                    gz.Write(data, 0, data.Length);
+                                }
+                                exportedHashes.Add(meta.Hash);
+                            }
+                        }
+
+                        // 2. Metadata Export (SQL)
+                        string safeName = meta.Name.Replace("'", "''");
+                        sw.WriteLine($"INSERT INTO fsassets (id, hash, name, type, create_time) VALUES ('{meta.UUID}', '{meta.Hash}', '{safeName}', {meta.Type}, {meta.Created});");
+
+                        count++;
+                        if (count % 100 == 0) MainConsole.Instance.Output($"Processed {count} assets...");
                     }
-                    count++;
-                    if (count % 100 == 0) MainConsole.Instance.Output($"Exported {count}...");
-                }
-                catch (Exception ex)
-                {
-                    m_log.Error($"[ADVANCED ASSET SERVICE]: Error exporting {meta.UUID}: {ex.Message}");
+                    catch (Exception ex)
+                    {
+                        m_log.Error($"[ADVANCED ASSET SERVICE]: Error exporting {meta.UUID}: {ex.Message}");
+                    }
                 }
             }
-            MainConsole.Instance.Output($"Total exported: {count}");
+            
+            MainConsole.Instance.Output($"Total processed: {count}");
+            MainConsole.Instance.Output($"Deduplicated files: {exportedHashes.Count}");
+            MainConsole.Instance.Output($"Metadata SQL saved to: {sqlPath}");
         }
 
         private string HashToPath(string hash)
         {
             if (hash == null || hash.Length < 10) return Path.Combine("junkyard", hash ?? "null");
             
-            string path = Path.Combine(hash.Substring(0, 2),
-                          Path.Combine(hash.Substring(2, 2),
-                          Path.Combine(hash.Substring(4, 2),
-                          hash.Substring(6, 4))));
-            
-            return Path.Combine(path, hash);
+            return Path.Combine(hash.Substring(0, 2),
+                   Path.Combine(hash.Substring(2, 2),
+                   Path.Combine(hash.Substring(4, 2),
+                   hash)));
         }
 
         private void HandleExportAsset(string module, string[] args)
@@ -356,8 +418,51 @@ namespace OpenSim.Services.AdvancedAssetService
             m_PackManager.RebuildIndex();
         }
 
+        private void ProcessShadowSync()
+        {
+            if (m_IsSyncing || m_GridConnector == null) return;
+            m_IsSyncing = true;
+
+            try
+            {
+                var unsynced = m_PackManager.GetUnsyncedAssets(100); // Batch of 100
+                if (unsynced.Count > 0)
+                {
+                    m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Syncing {0} assets to grid database...", unsynced.Count);
+                    int count = 0;
+                    foreach (var meta in unsynced)
+                    {
+                        AssetMetadata am = new AssetMetadata
+                        {
+                            FullID = new UUID(meta.UUID),
+                            ID = meta.UUID,
+                            Type = meta.Type,
+                            Name = meta.Name,
+                            CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+                        };
+
+                        if (m_GridConnector.Store(am, meta.Hash))
+                        {
+                            m_PackManager.MarkAsSynced(meta.UUID);
+                            count++;
+                        }
+                    }
+                    if (count > 0) m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Shadow Sync: {0} assets synchronized.", count);
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error("[ADVANCED ASSET SERVICE]: Shadow Sync error: " + ex.Message);
+            }
+            finally
+            {
+                m_IsSyncing = false;
+            }
+        }
+
         public void Dispose()
         {
+            m_SyncTimer?.Stop();
             if (m_PackManager != null)
             {
                 m_PackManager.Dispose();

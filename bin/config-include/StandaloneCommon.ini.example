@@ -75,6 +75,9 @@
     AssetCaching = "FlotsamAssetCache"
     Include-FlotsamCache = "config-include/FlotsamCache.ini"
 
+    ;AssetCaching = "AdvancedAssetCache"
+    ;Include-AdvancedAssetCache = "config-include/AdvancedAssetCache.ini"
+
     ;; Authorization is not on by default, as it depends on external php
     ;AuthorizationServices = "LocalAuthorizationServicesConnector"
 
