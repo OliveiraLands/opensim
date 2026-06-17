@@ -1,0 +1,20 @@
+[AssetCache]
+    ;;
+    ;; Opções para o AdvancedAssetCache (AAC)
+    ;;
+    ;; O AAC é um cache de alta performance que agrupa assets em arquivos grandes (PackFiles)
+    ;; para evitar o problema de milhões de pequenos arquivos no sistema operacional.
+    ;;
+
+    ;; Diretório onde os pacotes de cache e o índice SQLite serão armazenados.
+    ;; Padrão: assetcache_aac
+    ; CacheDirectory = "assetcache_aac"
+
+    ;; Tamanho máximo do cache em Megabytes.
+    ;; Quando este limite é atingido, o AAC deleta o pacote mais antigo (LRU).
+    ;; Padrão: 2048 (2GB)
+    ; MaxCacheSize = 2048
+
+    ;; Tamanho máximo de cada arquivo de pacote (.bin) em Megabytes.
+    ;; Padrão: 256
+    ; MaxPackSize = 256
