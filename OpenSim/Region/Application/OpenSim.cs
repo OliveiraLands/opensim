@@ -289,6 +289,7 @@ namespace OpenSim
                                              + " [--bounding-origin \"<x,y,z>\"]"
                                              + " [--bounding-size \"<x,y,z>\"]"
                                              + " [--displacement \"<x,y,z>\"]"
+                                             + " [--ignore-error]"
                                              + " [-d|--debug]"
                                              + " [<OAR path>]",
                                           "Load a region's data from an OAR archive.",
@@ -299,6 +300,7 @@ namespace OpenSim
                                             + "  --mergeReplaceObjects if scene as a object with same id, replace it\n"
                                             + "       without this option, skip loading that object\n"
                                             + "--skip-assets will load the OAR but ignore the assets it contains.\n"
+                                            + "--ignore-error will skip prims with missing or corrupt assets and serialization issues.\n"
                                             + "--force-assets will load the OAR and try to upload the assets it contains.\n"
                                             + "       it will REPLACE those assets on local region cache\n"
                                             + "       it will also try to upload them to service, but that only work if they are not present"

@@ -115,9 +115,10 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
 
                 scene.AddCommand(
                     "Archiving", this, "load iar",
-                    "load iar [-m|--merge] <first> <last> <inventory path> <password> [<IAR path>]",
+                    "load iar [-m|--merge] [--ignore-error] <first> <last> <inventory path> <password> [<IAR path>]",
                     "Load user inventory archive (IAR).",
-                    "-m|--merge is an option which merges the loaded IAR with existing inventory folders where possible, rather than always creating new ones"
+                    "-m|--merge is an option which merges the loaded IAR with existing inventory folders where possible, rather than always creating new ones" + Environment.NewLine
+                    + "--ignore-error is an option which skips inventory items with missing or damaged assets" + Environment.NewLine
                     + "<first> is user's first name." + Environment.NewLine
                     + "<last> is user's last name." + Environment.NewLine
                     + "<inventory path> is the path inside the user's inventory where the IAR should be loaded." + Environment.NewLine
@@ -313,6 +314,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
                         try
                         {
                             request = new InventoryArchiveReadRequest(id, this, m_aScene.InventoryService, m_aScene.AssetService, m_aScene.UserAccountService, userInfo, invPath, loadStream, merge);
+                            request.IgnoreError = (options.ContainsKey("ignore-error") ? (bool)options["ignore-error"] : false);
                         }
                         catch (EntryPointNotFoundException e)
                         {
@@ -361,6 +363,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
                         try
                         {
                             request = new InventoryArchiveReadRequest(id, this, m_aScene.InventoryService, m_aScene.AssetService, m_aScene.UserAccountService, userInfo, invPath, loadPath, merge);
+                            request.IgnoreError = (options.ContainsKey("ignore-error") ? (bool)options["ignore-error"] : false);
                         }
                         catch (EntryPointNotFoundException e)
                         {
@@ -399,7 +402,9 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
                 UUID id = UUID.Random();
 
                 Dictionary<string, object> options = new Dictionary<string, object>();
-                OptionSet optionSet = new OptionSet().Add("m|merge", delegate (string v) { options["merge"] = v != null; });
+                OptionSet optionSet = new OptionSet()
+                    .Add("m|merge", delegate (string v) { options["merge"] = v != null; })
+                    .Add("ignore-error", delegate (string v) { options["ignore-error"] = v != null; });
 
                 List<string> mainParams = optionSet.Parse(cmdparams);
 

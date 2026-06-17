@@ -27,6 +27,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
@@ -152,6 +153,8 @@ namespace OpenSim.Region.CoreModules.World.Archiver
         protected bool m_noObjects = false;
         protected bool m_boundingBox = false;
         protected bool m_debug = false;
+        protected bool m_ignoreError = false;
+        private HashSet<UUID> m_loadedOarAssetIds = new HashSet<UUID>();
 
         /// <summary>
         /// Used to cache lookups for valid uuids.
@@ -259,6 +262,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             }
 
             m_debug = options.ContainsKey("debug");
+            m_ignoreError = options.ContainsKey("ignore-error");
 
             // Zero can never be a valid user id (or group)
             m_validUserUuids[UUID.Zero] = false;
@@ -281,6 +285,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             m_merge = options.ContainsKey("merge");
             m_mergeReplaceObjects = options.ContainsKey("mReplaceObjects");
             m_requestId = requestId;
+            m_ignoreError = options.ContainsKey("ignore-error");
 
             m_defaultUser = scene.RegionInfo.EstateSettings.EstateOwner;
 
@@ -647,6 +652,94 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             throw new Exception("[ARCHIVER]: Control file not found");
         }
 
+        private bool CheckSceneObjectAssetsExist(Scene scene, SceneObjectGroup sog, HashSet<UUID> loadedOarAssetIds, out string missingAssetName)
+        {
+            missingAssetName = string.Empty;
+            List<string> assetIdsToCheck = new List<string>();
+            Dictionary<string, string> assetNames = new Dictionary<string, string>();
+
+            foreach (SceneObjectPart part in sog.Parts)
+            {
+                if (part.Shape != null && part.Shape.Textures != null)
+                {
+                    Primitive.TextureEntry te = part.Shape.Textures;
+                    if (te.DefaultTexture != null && te.DefaultTexture.TextureID != UUID.Zero)
+                    {
+                        string idStr = te.DefaultTexture.TextureID.ToString();
+                        assetIdsToCheck.Add(idStr);
+                        assetNames[idStr] = "Texture";
+                    }
+                    if (te.FaceTextures != null)
+                    {
+                        foreach (var face in te.FaceTextures)
+                        {
+                            if (face != null && face.TextureID != UUID.Zero)
+                            {
+                                string idStr = face.TextureID.ToString();
+                                assetIdsToCheck.Add(idStr);
+                                assetNames[idStr] = "Texture";
+                            }
+                        }
+                    }
+                }
+
+                if (part.Inventory != null)
+                {
+                    foreach (TaskInventoryItem item in part.Inventory.GetInventoryItems())
+                    {
+                        if (item.AssetID != UUID.Zero)
+                        {
+                            string idStr = item.AssetID.ToString();
+                            assetIdsToCheck.Add(idStr);
+                            assetNames[idStr] = string.Format("Inventory Item '{0}' (Type: {1})", item.Name, item.Type);
+                        }
+                    }
+                }
+            }
+
+            List<string> externalToCheck = new List<string>();
+            foreach (string idStr in assetIdsToCheck.Distinct())
+            {
+                if (UUID.TryParse(idStr, out UUID uuid))
+                {
+                    if (!loadedOarAssetIds.Contains(uuid))
+                    {
+                        externalToCheck.Add(idStr);
+                    }
+                }
+            }
+
+            if (externalToCheck.Count > 0)
+            {
+                bool[] exists = m_assetService.AssetsExist(externalToCheck.ToArray());
+                if (exists != null && exists.Length == externalToCheck.Count)
+                {
+                    for (int i = 0; i < externalToCheck.Count; i++)
+                    {
+                        if (!exists[i])
+                        {
+                            missingAssetName = assetNames[externalToCheck[i]] + " " + externalToCheck[i];
+                            return false;
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (string idStr in externalToCheck)
+                    {
+                        bool[] indExists = m_assetService.AssetsExist(new string[] { idStr });
+                        if (indExists == null || indExists.Length == 0 || !indExists[0])
+                        {
+                            missingAssetName = assetNames[idStr] + " " + idStr;
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Load serialized scene objects.
         /// </summary>
@@ -669,7 +762,43 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             int mergeskip = 0;
             foreach (string serialisedSceneObject in serialisedSceneObjects)
             {
-                SceneObjectGroup sceneObject = serialiser.DeserializeGroupFromXml2(serialisedSceneObject);
+                SceneObjectGroup sceneObject = null;
+                try
+                {
+                    sceneObject = serialiser.DeserializeGroupFromXml2(serialisedSceneObject);
+                }
+                catch (Exception ex)
+                {
+                    if (m_ignoreError)
+                    {
+                        m_log.Warn($"[ARCHIVER]: Error deserializing scene object: {ex.Message}. Skipping.");
+                        continue;
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+
+                if (sceneObject is null)
+                {
+                    if (m_ignoreError)
+                    {
+                        m_log.Warn("[ARCHIVER]: Deserialized scene object is null. Skipping.");
+                        continue;
+                    }
+                    continue;
+                }
+
+                if (m_ignoreError)
+                {
+                    if (!CheckSceneObjectAssetsExist(scene, sceneObject, m_loadedOarAssetIds, out string missingName))
+                    {
+                        m_log.Warn($"[ARCHIVER]: Skipping object {sceneObject.Name} ({sceneObject.UUID}) because it has missing asset: {missingName}");
+                        continue;
+                    }
+                }
+
                 if (m_merge)
                 {
                     if(scene.TryGetSceneObjectGroup(sceneObject.UUID, out SceneObjectGroup oldSog))
@@ -1080,6 +1209,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             };
 
             m_assetService.Store(asset);
+            m_loadedOarAssetIds.Add(assetID);
             forceCache?.Cache(asset,true);
             return true; // not right
         }

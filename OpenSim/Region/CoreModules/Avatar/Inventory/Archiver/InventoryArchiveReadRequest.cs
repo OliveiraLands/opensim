@@ -27,6 +27,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
@@ -96,6 +97,23 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
 
         protected bool m_assetsLoaded;
         protected bool m_inventoryNodesLoaded;
+
+        protected bool m_ignoreError = false;
+        private HashSet<UUID> m_loadedAssetIds = new HashSet<UUID>();
+        private HashSet<UUID> m_addedItemIds = new HashSet<UUID>();
+
+        private class PendingItemInfo
+        {
+            public InventoryItemBase Item;
+            public InventoryFolderBase Folder;
+        }
+        private List<PendingItemInfo> m_pendingInventoryItems = new List<PendingItemInfo>();
+
+        public bool IgnoreError
+        {
+            get { return m_ignoreError; }
+            set { m_ignoreError = value; }
+        }
 
         protected int m_successfulAssetRestores;
         protected int m_failedAssetRestores;
@@ -210,21 +228,90 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
 
                 while ((data = archive.ReadEntry(out filePath, out TarArchiveReader.TarEntryType entryType)) != null)
                 {
-                    if (filePath == ArchiveConstants.CONTROL_FILE_PATH)
+                    try
                     {
-                        LoadControlFile(data);
+                        if (filePath == ArchiveConstants.CONTROL_FILE_PATH)
+                        {
+                            LoadControlFile(data);
+                        }
+                        else if (filePath.StartsWith(ArchiveConstants.ASSETS_PATH))
+                        {
+                            LoadAssetFile(filePath, data);
+                        }
+                        else if (filePath.StartsWith(ArchiveConstants.INVENTORY_PATH))
+                        {
+                            LoadInventoryFile(filePath, entryType, data);
+                        }
                     }
-                    else if (filePath.StartsWith(ArchiveConstants.ASSETS_PATH))
+                    catch (Exception ex)
                     {
-                        LoadAssetFile(filePath, data);
-                    }
-                    else if (filePath.StartsWith(ArchiveConstants.INVENTORY_PATH))
-                    {
-                        LoadInventoryFile(filePath, entryType, data);
+                        if (m_ignoreError)
+                        {
+                            m_log.WarnFormat("[INVENTORY ARCHIVER]: Error loading file {0} from archive: {1}. Ignoring and continuing.", filePath, ex.Message);
+                        }
+                        else
+                        {
+                            throw;
+                        }
                     }
                 }
 
                 archive.Close();
+
+                if (m_ignoreError)
+                {
+                    List<string> assetIdsToCheck = new List<string>();
+                    foreach (var pInfo in m_pendingInventoryItems)
+                    {
+                        if (pInfo.Item.AssetID != UUID.Zero && !m_loadedAssetIds.Contains(pInfo.Item.AssetID))
+                        {
+                            assetIdsToCheck.Add(pInfo.Item.AssetID.ToString());
+                        }
+                    }
+
+                    HashSet<string> existingAssets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (assetIdsToCheck.Count > 0)
+                    {
+                        string[] idsArray = assetIdsToCheck.Distinct().ToArray();
+                        bool[] exists = m_AssetService.AssetsExist(idsArray);
+                        if (exists != null && exists.Length == idsArray.Length)
+                        {
+                            for (int i = 0; i < idsArray.Length; i++)
+                            {
+                                if (exists[i]) existingAssets.Add(idsArray[i]);
+                            }
+                        }
+                    }
+
+                    foreach (var pInfo in m_pendingInventoryItems)
+                    {
+                        bool assetExists = pInfo.Item.AssetID == UUID.Zero || 
+                                           m_loadedAssetIds.Contains(pInfo.Item.AssetID) || 
+                                           existingAssets.Contains(pInfo.Item.AssetID.ToString());
+
+                        if (assetExists)
+                        {
+                            if (!m_InventoryService.AddItem(pInfo.Item))
+                            {
+                                m_log.WarnFormat("[INVENTORY ARCHIVER]: Unable to save item {0} in folder {1}", pInfo.Item.Name, pInfo.Item.Folder);
+                            }
+                            else
+                            {
+                                m_addedItemIds.Add(pInfo.Item.ID);
+                                m_successfulItemRestores++;
+                                if (!m_loadedNodes.ContainsKey(pInfo.Folder.ID))
+                                {
+                                    m_loadedNodes[pInfo.Folder.ID] = pInfo.Item;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            m_log.WarnFormat("[INVENTORY ARCHIVER]: Skipping item {0} because its asset {1} is missing from both the IAR and database.", pInfo.Item.Name, pInfo.Item.AssetID);
+                        }
+                    }
+                }
+
                 LoadInventoryLinks();
 
                 m_log.DebugFormat(
@@ -481,8 +568,15 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
             else
             {
                 m_creatorIdForAssetId[item.AssetID] = item.CreatorIdAsUuid;
-                if (!m_InventoryService.AddItem(item))
-                    m_log.WarnFormat("[INVENTORY ARCHIVER]: Unable to save item {0} in folder {1}", item.Name, item.Folder);
+                if (m_ignoreError)
+                {
+                    m_pendingInventoryItems.Add(new PendingItemInfo { Item = item, Folder = loadFolder });
+                }
+                else
+                {
+                    if (!m_InventoryService.AddItem(item))
+                        m_log.WarnFormat("[INVENTORY ARCHIVER]: Unable to save item {0} in folder {1}", item.Name, item.Folder);
+                }
             }
 
             return item;
@@ -565,6 +659,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
             };
 
             m_AssetService.Store(asset);
+            m_loadedAssetIds.Add(assetId);
 
             return true;
         }
@@ -628,7 +723,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
             {
                 InventoryItemBase item = LoadItem(data, foundFolder);
 
-                if (item != null)
+                if (item != null && !m_ignoreError)
                 {
                     m_successfulItemRestores++;
 
@@ -650,6 +745,13 @@ namespace OpenSim.Region.CoreModules.Avatar.Inventory.Archiver
                 if(m_itemIDs.ContainsKey(target))
                 {
                     it.AssetID = m_itemIDs[target];
+                    
+                    if (m_ignoreError && !m_addedItemIds.Contains(it.AssetID))
+                    {
+                        m_log.WarnFormat("[INVENTORY ARCHIVER]: Skipping link {0} because its target item {1} was skipped.", it.Name, it.AssetID);
+                        continue;
+                    }
+
                     if(!m_InventoryService.AddItem(it))
                         m_log.WarnFormat("[INVENTORY ARCHIVER]: Unable to save item {0} in folder {1}",it.Name,it.Folder);
                     else

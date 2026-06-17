@@ -114,9 +114,11 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             Vector3 boundingOrigin = new Vector3(0f, 0f, Constants.MinSimulationHeight);
             Vector3 boundingSize = new Vector3(Scene.RegionInfo.RegionSizeX, Scene.RegionInfo.RegionSizeY, Constants.MaxSimulationHeight - Constants.MinSimulationHeight);
             bool debug = false;
+            bool ignoreError = false;
             
             OptionSet options = new OptionSet();
             options.Add("m|merge", delegate(string v) { mergeOar = (v != null); });
+            options.Add("ignore-error", delegate(string v) { ignoreError = (v != null); });
             options.Add("mergeReplaceObjects", delegate (string v) { mergeReplaceObjects = (v != null); });
             options.Add("s|skip-assets", delegate(string v) { skipAssets = (v != null); });
             options.Add("force-assets", delegate(string v) { forceAssets = (v != null); });
@@ -223,6 +225,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             if (mergeTerrain) archiveOptions.Add("merge-terrain", null);
             if (mergeParcels) archiveOptions.Add("merge-parcels", null);
             if (noObjects) archiveOptions.Add("no-objects", null);
+            if (ignoreError) archiveOptions.Add("ignore-error", null);
             if (defaultUser != "")
             {
                 UUID defaultUserUUID = UUID.Zero;

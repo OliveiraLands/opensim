@@ -88,6 +88,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas search-content", "aas search-content <string>", "Search assets for content", HandleSearchContent);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify all assets integrity", HandleVerify);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas rebuild-index", "aas rebuild-index", "Rebuild the SQLite index from PackFiles", HandleRebuildIndex);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-cache", "aas import-cache <path>", "Bulk import assets from Flotsam file cache", HandleImportCache);
         }
 
         public virtual AssetBase Get(string id)
@@ -274,6 +275,67 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
             MainConsole.Instance.Output($"Total imported: {count}");
+        }
+
+        private void HandleImportCache(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas import-cache <path>");
+                return;
+            }
+            string path = args[2];
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found.");
+                return;
+            }
+
+            string[] files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+            MainConsole.Instance.Output(string.Format("Found {0} files. Scanning for Flotsam cache assets...", files.Length));
+
+            int totalScanned = 0;
+            int successCount = 0;
+
+            #pragma warning disable SYSLIB0011
+            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+
+            foreach (string file in files)
+            {
+                string filename = Path.GetFileName(file);
+                if (!UUID.TryParse(filename, out UUID assetID))
+                {
+                    continue;
+                }
+
+                totalScanned++;
+
+                try
+                {
+                    using (FileStream fs = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        if (fs.Length == 0) continue;
+
+                        AssetBase asset = (AssetBase)bformatter.Deserialize(fs);
+                        if (asset != null)
+                        {
+                            Store(asset);
+                            successCount++;
+                            if (successCount % 100 == 0)
+                            {
+                                MainConsole.Instance.Output(string.Format("Imported {0} assets...", successCount));
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    m_log.Debug(string.Format("[ADVANCED ASSET SERVICE]: Error importing cache file {0}: {1}", filename, ex.Message));
+                }
+            }
+            #pragma warning restore SYSLIB0011
+
+            MainConsole.Instance.Output(string.Format("Import scan finished. Scanned {0} UUID files. Successfully imported {1} assets to AdvancedAssetService.", totalScanned, successCount));
         }
 
         private void HandleExportLegacy(string module, string[] args)
