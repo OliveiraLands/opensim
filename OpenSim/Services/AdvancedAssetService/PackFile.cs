@@ -15,7 +15,7 @@ using System.Reflection;
 namespace OpenSim.Services.AdvancedAssetService
 {
     public class PackFileIndexEntry { public string Hash; public long Offset; public int Length; public int PackFileID; }
-    public class AssetMetadataRecord { public string Hash; public sbyte Type; public string Name; public long Created; }
+    public class AssetMetadataRecord { public string UUID; public string Hash; public sbyte Type; public string Name; public long Created; }
     
     public class AssetWriteOp
     {
@@ -329,6 +329,33 @@ namespace OpenSim.Services.AdvancedAssetService
                             long ts = reader.GetInt64(3);
                             string dateStr = ts > 0 ? DateTimeOffset.FromUnixTimeSeconds(ts).LocalDateTime.ToString("yyyy-MM-dd HH:mm") : "Unknown";
                             results.Add($"{reader.GetString(0)} | {reader.GetString(1)} (Type: {reader.GetInt32(2)}, Added: {dateStr})");
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+
+        public List<AssetMetadataRecord> GetAllAssets()
+        {
+            List<AssetMetadataRecord> results = new List<AssetMetadataRecord>();
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT uuid, hash, type, name, created FROM asset_map";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            results.Add(new AssetMetadataRecord
+                            {
+                                UUID = reader.GetString(0),
+                                Hash = reader.GetString(1),
+                                Type = (sbyte)reader.GetInt32(2),
+                                Name = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                                Created = reader.GetInt64(4)
+                            });
                         }
                     }
                 }

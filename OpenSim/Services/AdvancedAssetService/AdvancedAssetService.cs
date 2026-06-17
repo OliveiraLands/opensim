@@ -13,6 +13,7 @@ using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Services.Base;
 using OpenSim.Services.Interfaces;
+using System.IO.Compression;
 using OpenSim.Data;
 
 namespace OpenSim.Services.AdvancedAssetService
@@ -59,6 +60,8 @@ namespace OpenSim.Services.AdvancedAssetService
             if (MainConsole.Instance == null) return;
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-asset", "aas export-asset <ID> <path>", "Export an asset to a file", HandleExportAsset);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-asset", "aas import-asset <path> <type> <name>", "Import an asset from a file", HandleImportAsset);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-legacy", "aas import-legacy <path>", "Bulk import assets from FSAssetService structure", HandleImportLegacy);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-legacy", "aas export-legacy <path>", "Bulk export assets to FSAssetService structure", HandleExportLegacy);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas search-content", "aas search-content <string>", "Search assets for content", HandleSearchContent);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify all assets integrity", HandleVerify);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas rebuild-index", "aas rebuild-index", "Rebuild the SQLite index from PackFiles", HandleRebuildIndex);
@@ -184,6 +187,108 @@ namespace OpenSim.Services.AdvancedAssetService
         }
 
         // Command Handlers
+        private void HandleImportLegacy(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas import-legacy <path>");
+                return;
+            }
+            string path = args[2];
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found.");
+                return;
+            }
+
+            string[] files = Directory.GetFiles(path, "*.gz", SearchOption.AllDirectories);
+            MainConsole.Instance.Output($"Found {files.Length} legacy assets to import.");
+
+            int count = 0;
+            foreach (string file in files)
+            {
+                try
+                {
+                    string hash = Path.GetFileNameWithoutExtension(file);
+                    byte[] data;
+                    using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read))
+                    using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        gz.CopyTo(ms);
+                        data = ms.ToArray();
+                    }
+
+                    // For legacy import without DB, we use Hash as Name and generate a UUID if hash is not a UUID
+                    string assetID = hash;
+                    if (!UUID.TryParse(hash, out UUID id))
+                        assetID = UUID.Random().ToString();
+
+                    m_PackManager.StoreAssetData(assetID, data, (sbyte)AssetType.Unknown, "Legacy Import " + hash);
+                    count++;
+                    if (count % 100 == 0) MainConsole.Instance.Output($"Imported {count}...");
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error($"[ADVANCED ASSET SERVICE]: Error importing {file}: {ex.Message}");
+                }
+            }
+            MainConsole.Instance.Output($"Total imported: {count}");
+        }
+
+        private void HandleExportLegacy(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas export-legacy <path>");
+                return;
+            }
+            string basePath = args[2];
+            if (!Directory.Exists(basePath)) Directory.CreateDirectory(basePath);
+
+            var assets = m_PackManager.GetAllAssets();
+            MainConsole.Instance.Output($"Exporting {assets.Count} assets to legacy format...");
+
+            int count = 0;
+            foreach (var meta in assets)
+            {
+                try
+                {
+                    byte[] data = m_PackManager.GetAssetData(meta.UUID, out _, out _);
+                    if (data == null) continue;
+
+                    string relPath = HashToPath(meta.Hash);
+                    string fullPath = Path.Combine(basePath, relPath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
+
+                    using (FileStream fs = new FileStream(fullPath + ".gz", FileMode.Create))
+                    using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                    {
+                        gz.Write(data, 0, data.Length);
+                    }
+                    count++;
+                    if (count % 100 == 0) MainConsole.Instance.Output($"Exported {count}...");
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error($"[ADVANCED ASSET SERVICE]: Error exporting {meta.UUID}: {ex.Message}");
+                }
+            }
+            MainConsole.Instance.Output($"Total exported: {count}");
+        }
+
+        private string HashToPath(string hash)
+        {
+            if (hash == null || hash.Length < 10) return Path.Combine("junkyard", hash ?? "null");
+            
+            string path = Path.Combine(hash.Substring(0, 2),
+                          Path.Combine(hash.Substring(2, 2),
+                          Path.Combine(hash.Substring(4, 2),
+                          hash.Substring(6, 4))));
+            
+            return Path.Combine(path, hash);
+        }
+
         private void HandleExportAsset(string module, string[] args)
         {
             if (args.Length < 4)
