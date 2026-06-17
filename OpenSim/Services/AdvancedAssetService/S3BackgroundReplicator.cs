@@ -83,21 +83,32 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void ExecuteSync()
         {
+            DoSync(msg => m_log.Debug("[ADVANCED ASSET SERVICE S3]: " + msg));
+        }
+
+        public void ForceSync(Action<string> logWriter)
+        {
+            DoSync(logWriter);
+        }
+
+        private void DoSync(Action<string> logWriter)
+        {
             if (m_isSyncing || m_s3Client == null) return;
             m_isSyncing = true;
 
-            m_log.Debug("[ADVANCED ASSET SERVICE S3]: Starting background S3 synchronization...");
+            logWriter("Starting S3 synchronization...");
 
             try
             {
                 if (!Directory.Exists(m_storagePath))
                 {
-                    m_log.WarnFormat("[ADVANCED ASSET SERVICE S3]: Storage path {0} does not exist. Aborting sync.", m_storagePath);
+                    logWriter(string.Format("Storage path {0} does not exist. Aborting sync.", m_storagePath));
                     return;
                 }
 
                 // 1. Sync PackFiles (*.bin)
                 string[] files = Directory.GetFiles(m_storagePath, "pack_*.bin");
+                int packUploaded = 0;
                 foreach (string file in files)
                 {
                     try
@@ -110,14 +121,15 @@ namespace OpenSim.Services.AdvancedAssetService
                         // Check if file already exists in S3 with same size
                         if (!FileExistsInS3(s3Key, localLength))
                         {
-                            m_log.InfoFormat("[ADVANCED ASSET SERVICE S3]: Uploading {0} ({1} bytes) to S3...", filename, localLength);
+                            logWriter(string.Format("Uploading {0} ({1} bytes) to S3...", filename, localLength));
                             UploadFile(file, s3Key);
-                            m_log.InfoFormat("[ADVANCED ASSET SERVICE S3]: Upload completed: {0}", filename);
+                            packUploaded++;
+                            logWriter(string.Format("Upload completed: {0}", filename));
                         }
                     }
                     catch (Exception fileEx)
                     {
-                        m_log.Error("[ADVANCED ASSET SERVICE S3]: Error syncing file " + file + ": " + fileEx.Message);
+                        logWriter("Error syncing file " + file + ": " + fileEx.Message);
                     }
                 }
 
@@ -129,13 +141,13 @@ namespace OpenSim.Services.AdvancedAssetService
                     try
                     {
                         File.Copy(indexFile, tempIndex, true);
-                        m_log.Debug("[ADVANCED ASSET SERVICE S3]: Uploading SQLite index snapshot to S3...");
+                        logWriter("Uploading SQLite index snapshot to S3...");
                         UploadFile(tempIndex, "metadata/index.db");
-                        m_log.Debug("[ADVANCED ASSET SERVICE S3]: SQLite index snapshot upload completed.");
+                        logWriter("SQLite index snapshot upload completed.");
                     }
                     catch (Exception dbEx)
                     {
-                        m_log.Error("[ADVANCED ASSET SERVICE S3]: Error syncing SQLite index database: " + dbEx.Message);
+                        logWriter("Error syncing SQLite index database: " + dbEx.Message);
                     }
                     finally
                     {
@@ -147,10 +159,11 @@ namespace OpenSim.Services.AdvancedAssetService
                         catch {}
                     }
                 }
+                logWriter("S3 synchronization finished.");
             }
             catch (Exception ex)
             {
-                m_log.Error("[ADVANCED ASSET SERVICE S3]: Global error during S3 sync: " + ex.Message);
+                logWriter("Global error during S3 sync: " + ex.Message);
             }
             finally
             {

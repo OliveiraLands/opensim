@@ -91,6 +91,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify all assets integrity", HandleVerify);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas rebuild-index", "aas rebuild-index", "Rebuild the SQLite index from PackFiles", HandleRebuildIndex);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-cache", "aas import-cache <path>", "Bulk import assets from Flotsam file cache", HandleImportCache);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-s3", "aas sync-s3", "Force synchronization of assets with S3", HandleSyncS3);
         }
 
         public virtual AssetBase Get(string id)
@@ -338,6 +339,20 @@ namespace OpenSim.Services.AdvancedAssetService
             #pragma warning restore SYSLIB0011
 
             MainConsole.Instance.Output(string.Format("Import scan finished. Scanned {0} UUID files. Successfully imported {1} assets to AdvancedAssetService.", totalScanned, successCount));
+        }
+
+        private void HandleSyncS3(string module, string[] args)
+        {
+            if (m_S3Replicator == null)
+            {
+                MainConsole.Instance.Output("S3 replication is not enabled or configured.");
+                return;
+            }
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                m_S3Replicator.ForceSync(msg => MainConsole.Instance.Output(msg));
+            });
         }
 
         private void HandleExportLegacy(string module, string[] args)
