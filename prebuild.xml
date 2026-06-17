@@ -624,6 +624,7 @@
       <Reference name="System.Data.SQLite"/>
       <Reference name="Nini"/>
       <Reference name="log4net"/>
+      <PackageReference name="AWSSDK.S3" version="3.7.307.21"/>
       <Files>
         <Match pattern="*.cs" recurse="true">
           <Exclude name="obj" pattern="obj"/>

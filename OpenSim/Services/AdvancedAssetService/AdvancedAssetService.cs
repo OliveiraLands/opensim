@@ -31,6 +31,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private IFSAssetDataPlugin m_GridConnector;
         private Timer m_SyncTimer;
         private bool m_IsSyncing = false;
+        private S3BackgroundReplicator m_S3Replicator;
 
         public AdvancedAssetService(IConfigSource config) : this(config, "AssetService")
         {
@@ -75,6 +76,7 @@ namespace OpenSim.Services.AdvancedAssetService
             }
 
             RegisterCommands();
+            m_S3Replicator = new S3BackgroundReplicator(assetConfig, m_StoragePath);
             m_log.Info("[ADVANCED ASSET SERVICE]: Initialized with storage at " + m_StoragePath);
         }
 
@@ -525,6 +527,7 @@ namespace OpenSim.Services.AdvancedAssetService
         public void Dispose()
         {
             m_SyncTimer?.Stop();
+            m_S3Replicator?.Dispose();
             if (m_PackManager != null)
             {
                 m_PackManager.Dispose();

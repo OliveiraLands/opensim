@@ -275,6 +275,14 @@
     ; ConnectionString = "Data Source=localhost;Database=opensim;User ID=opensim;Password=***;"
     ; FallbackService = "OpenSim.Services.AssetService.dll:AssetService"
 
+    ;; S3 Replication Configuration (Optional background upload of PackFiles and SQLite index to S3)
+    ; S3AccessKey = ""
+    ; S3SecretKey = ""
+    ; S3BucketName = ""
+    ; S3ServiceUrl = "https://<account-id>.r2.cloudflarestorage.com"
+    ; S3Region = "us-east-1"
+    ; S3SyncInterval = 10
+
 
     ; Allow maptile assets to remotely deleted by remote calls to the asset service.
     ; There is no harm in having this as false - it just means that historical maptile assets are not deleted.
