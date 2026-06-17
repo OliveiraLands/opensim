@@ -27,6 +27,12 @@ namespace OpenSim.Services.AdvancedAssetService
         public TaskCompletionSource<string> Tcs;
     }
 
+    public class PendingUpdate
+    {
+        public Action<SQLiteCommand> Action;
+        public Action PostCommitAction;
+    }
+
     public class PackFileManager : IDisposable
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
@@ -41,8 +47,9 @@ namespace OpenSim.Services.AdvancedAssetService
         private object m_Lock = new object();
         
         private Timer m_BatchTimer;
-        private ConcurrentQueue<Action<SQLiteCommand>> m_PendingUpdates = new ConcurrentQueue<Action<SQLiteCommand>>();
+        private ConcurrentQueue<PendingUpdate> m_PendingUpdates = new ConcurrentQueue<PendingUpdate>();
         private BlockingCollection<AssetWriteOp> m_WriteQueue = new BlockingCollection<AssetWriteOp>(5000);
+        private ConcurrentDictionary<string, AssetWriteOp> m_PendingWritesCache = new ConcurrentDictionary<string, AssetWriteOp>(StringComparer.OrdinalIgnoreCase);
 
         public PackFileManager(string basePath)
         {
@@ -117,10 +124,18 @@ namespace OpenSim.Services.AdvancedAssetService
             }
         }
 
-        public byte[] GetAssetData(string uuid, out sbyte type, out string name)
+        public byte[] GetAssetData(string uuid, out sbyte type, out string name, bool verifyOnRead = false)
         {
             type = 0; name = string.Empty;
             string nid = NormalizeUUID(uuid);
+            
+            if (m_PendingWritesCache.TryGetValue(nid, out AssetWriteOp op))
+            {
+                type = op.Type;
+                name = op.Name;
+                return op.Data;
+            }
+
             lock (m_Lock)
             {
                 AssetMetadataRecord meta = GetMetadata(nid);
@@ -129,7 +144,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 PackFileIndexEntry entry = GetIndexEntry(meta.Hash);
                 if (entry == null) return null;
 
-                string packPath = Path.Combine(m_BasePath, $"pack_{entry.PackFileID}.bin");
+                string packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
                 try
                 {
                     using (FileStream fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -145,7 +160,18 @@ namespace OpenSim.Services.AdvancedAssetService
                         
                         fs.Seek(br.ReadUInt16(), SeekOrigin.Current); // Skip Name
                         int dataLen = br.ReadInt32();
-                        return br.ReadBytes(dataLen);
+                        byte[] data = br.ReadBytes(dataLen);
+                        
+                        if (verifyOnRead)
+                        {
+                            string computedHash = ComputeHash(data);
+                            if (computedHash != meta.Hash)
+                            {
+                                m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Corruption detected in asset {0}! Hash mismatch: expected {1}, got {2}", uuid, meta.Hash, computedHash));
+                                return null;
+                            }
+                        }
+                        return data;
                     }
                 }
                 catch { return null; }
@@ -163,6 +189,10 @@ namespace OpenSim.Services.AdvancedAssetService
                 Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Tcs = new TaskCompletionSource<string>() 
             };
+            
+            string nid = NormalizeUUID(uuid);
+            m_PendingWritesCache[nid] = op;
+
             m_WriteQueue.Add(op);
             return uuid;
         }
@@ -178,33 +208,22 @@ namespace OpenSim.Services.AdvancedAssetService
 
                     lock (m_Lock)
                     {
-                        QueueUpdate(cmd => {
-                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
-                            cmd.Parameters.Clear();
-                            cmd.Parameters.AddWithValue(null, nid); 
-                            cmd.Parameters.AddWithValue(null, hash);
-                            cmd.Parameters.AddWithValue(null, (int)op.Type); 
-                            cmd.Parameters.AddWithValue(null, op.Name ?? "");
-                            cmd.Parameters.AddWithValue(null, op.Created);
-                            cmd.ExecuteNonQuery();
-                        });
+                        bool isNewHash = GetIndexEntry(hash) == null;
+                        long offset = 0;
+                        int packId = m_CurrentPackID;
+                        bool packChanged = false;
 
-                        if (GetIndexEntry(hash) == null)
+                        if (isNewHash)
                         {
-                            string packPath = Path.Combine(m_BasePath, $"pack_{m_CurrentPackID}.bin");
+                            string packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
                             if (new FileInfo(packPath).Exists && new FileInfo(packPath).Length > m_MaxPackSize)
                             {
-                                m_CurrentPackID++;
-                                QueueUpdate(cmd => {
-                                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
-                                    cmd.Parameters.Clear();
-                                    cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
-                                    cmd.ExecuteNonQuery();
-                                });
-                                packPath = Path.Combine(m_BasePath, $"pack_{m_CurrentPackID}.bin");
+                                packId = m_CurrentPackID + 1;
+                                packChanged = true;
+                                packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
                             }
 
-                            long offset = 0;
+                            // 1. Physical Write (can throw exception if disk full or IO error)
                             using (FileStream fs = new FileStream(packPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                             using (BinaryWriter bw = new BinaryWriter(fs))
                             {
@@ -213,7 +232,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                 bw.Write(RECORD_VERSION);
                                 bw.Write(new UUID(op.UUID).GetBytes()); 
                                 bw.Write(op.Type);
-                                bw.Write(op.Created); // V2 Feature
+                                bw.Write(op.Created); 
                                 byte[] nameBytes = Encoding.UTF8.GetBytes(op.Name ?? "");
                                 bw.Write((ushort)nameBytes.Length); 
                                 bw.Write(nameBytes);
@@ -221,29 +240,65 @@ namespace OpenSim.Services.AdvancedAssetService
                                 bw.Write(op.Data);
                             }
 
-                            QueueUpdate(cmd => {
-                                cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
-                                cmd.Parameters.Clear();
-                                cmd.Parameters.AddWithValue(null, hash); 
-                                cmd.Parameters.AddWithValue(null, m_CurrentPackID);
-                                cmd.Parameters.AddWithValue(null, offset); 
-                                cmd.Parameters.AddWithValue(null, op.Data.Length);
-                                cmd.ExecuteNonQuery();
-                            });
+                            if (packChanged)
+                            {
+                                m_CurrentPackID = packId;
+                                QueueUpdate(cmd => {
+                                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
+                                    cmd.ExecuteNonQuery();
+                                });
+                            }
                         }
+
+                        // 2. Queue asset_map and index_assets update atomically
+                        QueueUpdate(
+                            cmd => {
+                                // 1. Inserção no asset_map
+                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                cmd.Parameters.Clear();
+                                cmd.Parameters.AddWithValue(null, nid); 
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, (int)op.Type); 
+                                cmd.Parameters.AddWithValue(null, op.Name ?? "");
+                                cmd.Parameters.AddWithValue(null, op.Created);
+                                cmd.ExecuteNonQuery();
+
+                                // 2. Inserção no index_assets se for novo hash
+                                if (isNewHash)
+                                {
+                                    cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, hash); 
+                                    cmd.Parameters.AddWithValue(null, packId);
+                                    cmd.Parameters.AddWithValue(null, offset); 
+                                    cmd.Parameters.AddWithValue(null, op.Data.Length);
+                                    cmd.ExecuteNonQuery();
+                                }
+                            },
+                            () => {
+                                m_PendingWritesCache.TryGetValue(nid, out var currentOp);
+                                if (currentOp == op)
+                                {
+                                    m_PendingWritesCache.TryRemove(nid, out _);
+                                }
+                            }
+                        );
                     }
                     op.Tcs.SetResult(hash);
                 }
                 catch (Exception ex) { 
                     m_log.Error("[ADVANCED ASSET SERVICE]: Background write error: " + ex.Message);
+                    try { m_PendingWritesCache.TryRemove(NormalizeUUID(op.UUID), out _); } catch {}
                     op.Tcs.SetException(ex);
                 }
             }
         }
 
-        private void QueueUpdate(Action<SQLiteCommand> action)
+        private void QueueUpdate(Action<SQLiteCommand> action, Action postCommitAction = null)
         {
-            m_PendingUpdates.Enqueue(action);
+            m_PendingUpdates.Enqueue(new PendingUpdate { Action = action, PostCommitAction = postCommitAction });
             if (m_PendingUpdates.Count >= 500) FlushBatch();
         }
 
@@ -252,11 +307,42 @@ namespace OpenSim.Services.AdvancedAssetService
             if (m_PendingUpdates.IsEmpty) return;
             lock (m_Lock)
             {
-                using (var trans = m_Connection.BeginTransaction())
-                using (var cmd = m_Connection.CreateCommand())
+                SQLiteTransaction trans = null;
+                try
                 {
-                    while (m_PendingUpdates.TryDequeue(out var action)) { try { action(cmd); } catch { } }
-                    trans.Commit();
+                    trans = m_Connection.BeginTransaction();
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        List<Action> postCommitActions = new List<Action>();
+                        while (m_PendingUpdates.TryDequeue(out var pendingUpdate)) 
+                        { 
+                            try 
+                            { 
+                                pendingUpdate.Action(cmd); 
+                                if (pendingUpdate.PostCommitAction != null)
+                                    postCommitActions.Add(pendingUpdate.PostCommitAction);
+                            } 
+                            catch (Exception ex)
+                            {
+                                m_log.Error("[ADVANCED ASSET SERVICE]: Error executing batch update: " + ex.Message);
+                            }
+                        }
+                        trans.Commit();
+
+                        foreach (var action in postCommitActions)
+                        {
+                            try { action(); } catch { }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error("[ADVANCED ASSET SERVICE]: Failed to commit SQLite batch transaction: " + ex.Message);
+                    try { trans?.Rollback(); } catch { }
+                }
+                finally
+                {
+                    trans?.Dispose();
                 }
             }
         }

@@ -94,7 +94,7 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             sbyte type;
             string name;
-            byte[] data = m_PackManager.GetAssetData(id, out type, out name);
+            byte[] data = m_PackManager.GetAssetData(id, out type, out name, m_VerifyOnRead);
             if (data != null)
             {
                 AssetBase asset = new AssetBase(new UUID(id), name, type, UUID.Zero.ToString());
@@ -137,7 +137,7 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             sbyte type;
             string name;
-            return m_PackManager.GetAssetData(id, out type, out name);
+            return m_PackManager.GetAssetData(id, out type, out name, m_VerifyOnRead);
         }
 
         public virtual bool Get(string id, object sender, AssetRetrieved handler)
