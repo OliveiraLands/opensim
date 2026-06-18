@@ -31,6 +31,7 @@ namespace OpenSim.Services.AdvancedAssetService
     {
         public Action<SQLiteCommand> Action;
         public Action PostCommitAction;
+        public Action OnFailureAction;
     }
 
     public class PackFileManager : IDisposable
@@ -57,6 +58,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private ConcurrentDictionary<string, AssetWriteOp> m_PendingWritesCache = new ConcurrentDictionary<string, AssetWriteOp>(StringComparer.OrdinalIgnoreCase);
 
         private ConcurrentDictionary<string, PackFileIndexEntry> m_InFlightHashes = new ConcurrentDictionary<string, PackFileIndexEntry>();
+        private Task m_WriteTask;
 
         public PackFileManager(string basePath)
         {
@@ -70,7 +72,7 @@ namespace OpenSim.Services.AdvancedAssetService
             m_BatchTimer.Elapsed += (s, e) => FlushBatch();
             m_BatchTimer.Start();
 
-            Task.Factory.StartNew(ProcessWriteQueue, TaskCreationOptions.LongRunning);
+            m_WriteTask = Task.Factory.StartNew(ProcessWriteQueue, TaskCreationOptions.LongRunning);
         }
 
         private void InitializeDatabase()
@@ -257,9 +259,6 @@ namespace OpenSim.Services.AdvancedAssetService
             if (data == null) return null;
             string nid = NormalizeUUID(uuid);
 
-            // Avoid redundant enqueuing of the same UUID if it's already pending
-            if (m_PendingWritesCache.ContainsKey(nid)) return uuid;
-
             var op = new AssetWriteOp { 
                 UUID = uuid, 
                 Data = data, 
@@ -269,7 +268,11 @@ namespace OpenSim.Services.AdvancedAssetService
                 Tcs = new TaskCompletionSource<string>() 
             };
             
-            m_PendingWritesCache[nid] = op;
+            if (!m_PendingWritesCache.TryAdd(nid, op))
+            {
+                return uuid;
+            }
+
             m_WriteQueue.Add(op);
             return uuid;
         }
@@ -322,7 +325,15 @@ namespace OpenSim.Services.AdvancedAssetService
                             if (new FileInfo(packPath).Exists && new FileInfo(packPath).Length > m_MaxPackSize)
                             {
                                 packId = m_CurrentPackID + 1;
+                                m_CurrentPackID = packId; // Update m_CurrentPackID immediately inside the lock!
                                 packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                                
+                                QueueUpdate(cmd => {
+                                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
+                                    cmd.ExecuteNonQuery();
+                                });
                             }
                         }
 
@@ -355,20 +366,10 @@ namespace OpenSim.Services.AdvancedAssetService
 
                     lock (m_Lock)
                     {
-                        if (isNewHash && packId > m_CurrentPackID)
-                        {
-                            m_CurrentPackID = packId;
-                            QueueUpdate(cmd => {
-                                cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
-                                cmd.Parameters.Clear();
-                                cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
-                                cmd.ExecuteNonQuery();
-                            });
-                        }
-
                         // Capture values for the closure
                         var currentEntry = entry;
                         var currentHash = hash;
+                        var wasNewHash = isNewHash;
 
                         // 2. Queue asset_map and index_assets update atomically
                         QueueUpdate(
@@ -384,7 +385,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                 cmd.ExecuteNonQuery();
 
                                 // 2. Inserção no index_assets se for novo hash
-                                if (isNewHash)
+                                if (wasNewHash)
                                 {
                                     cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
                                     cmd.Parameters.Clear();
@@ -402,6 +403,18 @@ namespace OpenSim.Services.AdvancedAssetService
                                     m_PendingWritesCache.TryRemove(nid, out _);
                                 }
                                 op.Tcs.SetResult(currentHash);
+                            },
+                            () => {
+                                m_PendingWritesCache.TryGetValue(nid, out var currentOp);
+                                if (currentOp == op)
+                                {
+                                    m_PendingWritesCache.TryRemove(nid, out _);
+                                }
+                                if (wasNewHash)
+                                {
+                                    m_InFlightHashes.TryRemove(currentHash, out _);
+                                }
+                                op.Tcs.SetException(new Exception("Failed to commit database transaction for asset " + op.UUID));
                             }
                         );
                     }
@@ -414,9 +427,9 @@ namespace OpenSim.Services.AdvancedAssetService
             }
         }
 
-        private void QueueUpdate(Action<SQLiteCommand> action, Action postCommitAction = null)
+        private void QueueUpdate(Action<SQLiteCommand> action, Action postCommitAction = null, Action onFailureAction = null)
         {
-            m_PendingUpdates.Enqueue(new PendingUpdate { Action = action, PostCommitAction = postCommitAction });
+            m_PendingUpdates.Enqueue(new PendingUpdate { Action = action, PostCommitAction = postCommitAction, OnFailureAction = onFailureAction });
             if (m_PendingUpdates.Count >= 500) FlushBatch();
         }
 
@@ -425,42 +438,90 @@ namespace OpenSim.Services.AdvancedAssetService
             if (m_PendingUpdates.IsEmpty) return;
             lock (m_Lock)
             {
+                List<PendingUpdate> updates = new List<PendingUpdate>();
+                while (m_PendingUpdates.TryDequeue(out var pendingUpdate))
+                {
+                    updates.Add(pendingUpdate);
+                }
+
+                if (updates.Count == 0) return;
+
                 SQLiteTransaction trans = null;
+                bool batchSucceeded = false;
                 try
                 {
                     trans = m_Connection.BeginTransaction();
                     using (var cmd = m_Connection.CreateCommand())
                     {
-                        List<Action> postCommitActions = new List<Action>();
-                        while (m_PendingUpdates.TryDequeue(out var pendingUpdate)) 
-                        { 
-                            try 
-                            { 
-                                pendingUpdate.Action(cmd); 
-                                if (pendingUpdate.PostCommitAction != null)
-                                    postCommitActions.Add(pendingUpdate.PostCommitAction);
-                            } 
-                            catch (Exception ex)
-                            {
-                                m_log.Error("[ADVANCED ASSET SERVICE]: Error executing batch update: " + ex.Message);
-                            }
+                        foreach (var update in updates)
+                        {
+                            update.Action(cmd);
                         }
                         trans.Commit();
-
-                        foreach (var action in postCommitActions)
-                        {
-                            try { action(); } catch { }
-                        }
+                        batchSucceeded = true;
                     }
                 }
                 catch (Exception ex)
                 {
-                    m_log.Error("[ADVANCED ASSET SERVICE]: Failed to commit SQLite batch transaction: " + ex.Message);
+                    m_log.Warn("[ADVANCED ASSET SERVICE]: Failed to commit SQLite batch transaction, falling back to individual commits. Error: " + ex.Message);
                     try { trans?.Rollback(); } catch { }
                 }
                 finally
                 {
                     trans?.Dispose();
+                }
+
+                if (batchSucceeded)
+                {
+                    foreach (var update in updates)
+                    {
+                        if (update.PostCommitAction != null)
+                        {
+                            try { update.PostCommitAction(); } catch (Exception ex) { m_log.Error("[ADVANCED ASSET SERVICE]: Error in post-commit action: " + ex.Message); }
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var update in updates)
+                    {
+                        SQLiteTransaction indTrans = null;
+                        bool indSucceeded = false;
+                        try
+                        {
+                            indTrans = m_Connection.BeginTransaction();
+                            using (var cmd = m_Connection.CreateCommand())
+                            {
+                                update.Action(cmd);
+                                indTrans.Commit();
+                                indSucceeded = true;
+                            }
+                        }
+                        catch (Exception indEx)
+                        {
+                            m_log.Error("[ADVANCED ASSET SERVICE]: Individual SQL update failed: " + indEx.Message);
+                            try { indTrans?.Rollback(); } catch { }
+                        }
+                        finally
+                        {
+                            indTrans?.Dispose();
+                        }
+
+                        if (indSucceeded)
+                        {
+                            if (update.PostCommitAction != null)
+                            {
+                                try { update.PostCommitAction(); } catch (Exception ex) { m_log.Error("[ADVANCED ASSET SERVICE]: Error in post-commit action: " + ex.Message); }
+                            }
+                        }
+                        else
+                        {
+                            if (update.OnFailureAction != null)
+                            {
+                                try { update.OnFailureAction(); } catch (Exception ex) { m_log.Error("[ADVANCED ASSET SERVICE]: Error in failure action: " + ex.Message); }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -649,8 +710,25 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             m_WriteQueue.CompleteAdding();
             m_BatchTimer?.Stop();
+            if (m_WriteTask != null)
+            {
+                try { m_WriteTask.Wait(10000); } catch { }
+            }
             FlushBatch();
             if (m_Connection != null) { m_Connection.Close(); m_Connection.Dispose(); m_Connection = null; }
+        }
+
+        public void BackupDatabase(string destinationPath)
+        {
+            lock (m_Lock)
+            {
+                FlushBatch();
+                using (var destinationConnection = new SQLiteConnection($"Data Source={destinationPath};Version=3;"))
+                {
+                    destinationConnection.Open();
+                    m_Connection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
+                }
+            }
         }
 
         public void VerifyIntegrity(Action<string> output)

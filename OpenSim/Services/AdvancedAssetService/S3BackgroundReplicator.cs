@@ -157,7 +157,15 @@ namespace OpenSim.Services.AdvancedAssetService
                     string tempIndex = Path.Combine(m_storagePath, "index_s3_upload.db");
                     try
                     {
-                        File.Copy(indexFile, tempIndex, true);
+                        if (m_packFileManager != null)
+                        {
+                            logWriter("Creating SQLite index backup snapshot...");
+                            m_packFileManager.BackupDatabase(tempIndex);
+                        }
+                        else
+                        {
+                            File.Copy(indexFile, tempIndex, true);
+                        }
                         logWriter("Uploading SQLite index snapshot to S3...");
                         UploadFile(tempIndex, "metadata/index.db");
                         logWriter("SQLite index snapshot upload completed.");
