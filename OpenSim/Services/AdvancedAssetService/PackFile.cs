@@ -45,6 +45,11 @@ namespace OpenSim.Services.AdvancedAssetService
         private int m_CurrentPackID = 0;
         private long m_MaxPackSize = 512 * 1024 * 1024;
         private object m_Lock = new object();
+
+        public int CurrentPackID
+        {
+            get { lock (m_Lock) { return m_CurrentPackID; } }
+        }
         
         private Timer m_BatchTimer;
         private ConcurrentQueue<PendingUpdate> m_PendingUpdates = new ConcurrentQueue<PendingUpdate>();

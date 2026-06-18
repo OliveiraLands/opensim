@@ -21,13 +21,15 @@ namespace OpenSim.Services.AdvancedAssetService
         private readonly string m_secretKey;
         private readonly string m_storagePath;
         private readonly int m_syncIntervalMs;
+        private readonly PackFileManager m_packFileManager;
 
         private IAmazonS3 m_s3Client;
         private System.Timers.Timer m_syncTimer;
         private bool m_isSyncing = false;
 
-        public S3BackgroundReplicator(IConfig config, string storagePath)
+        public S3BackgroundReplicator(IConfig config, string storagePath, PackFileManager packFileManager)
         {
+            m_packFileManager = packFileManager;
             m_storagePath = storagePath;
 
             m_accessKey = config.GetString("S3AccessKey", string.Empty).Trim();
@@ -114,6 +116,21 @@ namespace OpenSim.Services.AdvancedAssetService
                     try
                     {
                         string filename = Path.GetFileName(file);
+
+                        // Skip active (current) pack file to prevent file locking issues during append
+                        if (m_packFileManager != null && filename.StartsWith("pack_") && filename.EndsWith(".bin"))
+                        {
+                            string idStr = filename.Substring(5, filename.Length - 9);
+                            if (int.TryParse(idStr, out int packId))
+                            {
+                                if (packId == m_packFileManager.CurrentPackID)
+                                {
+                                    logWriter(string.Format("Skipping active pack file {0} from upload to prevent locking", filename));
+                                    continue;
+                                }
+                            }
+                        }
+
                         string s3Key = "packfiles/" + filename;
                         FileInfo fi = new FileInfo(file);
                         long localLength = fi.Length;
@@ -173,13 +190,16 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void UploadFile(string localPath, string s3Key)
         {
-            PutObjectRequest request = new PutObjectRequest
+            using (FileStream fs = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                BucketName = m_bucketName,
-                Key = s3Key,
-                FilePath = localPath
-            };
-            m_s3Client.PutObjectAsync(request).Wait();
+                PutObjectRequest request = new PutObjectRequest
+                {
+                    BucketName = m_bucketName,
+                    Key = s3Key,
+                    InputStream = fs
+                };
+                m_s3Client.PutObjectAsync(request).Wait();
+            }
         }
 
         private bool FileExistsInS3(string s3Key, long expectedSize)

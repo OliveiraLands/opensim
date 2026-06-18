@@ -76,7 +76,7 @@ namespace OpenSim.Services.AdvancedAssetService
             }
 
             RegisterCommands();
-            m_S3Replicator = new S3BackgroundReplicator(assetConfig, m_StoragePath);
+            m_S3Replicator = new S3BackgroundReplicator(assetConfig, m_StoragePath, m_PackManager);
             m_log.Info("[ADVANCED ASSET SERVICE]: Initialized with storage at " + m_StoragePath);
         }
 
