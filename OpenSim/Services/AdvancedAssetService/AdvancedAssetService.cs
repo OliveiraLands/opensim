@@ -117,7 +117,6 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
 
-            m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Asset {0} not found", id);
             return null;
         }
 
@@ -173,9 +172,6 @@ namespace OpenSim.Services.AdvancedAssetService
                 return asset.ID;
             }
 
-            m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Storing asset {0} (type {1}, name {2}, size {3})", 
-                asset.ID, asset.Type, asset.Name, asset.Data.Length);
-
             m_PackManager.StoreAssetData(asset.ID, asset.Data, asset.Type, asset.Name);
             return asset.ID;
         }
@@ -198,14 +194,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
         public virtual bool[] AssetsExist(string[] ids)
         {
-            bool[] exists = new bool[ids.Length];
-            for (int i = 0; i < ids.Length; i++)
-            {
-                exists[i] = m_PackManager.AssetExists(ids[i]);
-                if (!exists[i])
-                    m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Asset check: {0} NOT FOUND in index", ids[i]);
-            }
-            return exists;
+            return m_PackManager.AssetsExist(ids);
         }
 
         public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)
@@ -265,7 +254,7 @@ namespace OpenSim.Services.AdvancedAssetService
                         // It's a hash or invalid ID. 
                         // To preserve links, the original UUID MUST be used.
                         // If we only have the hash, we use it as ID (OpenSim will handle it if the caller knows this ID)
-                        m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Importing by content hash: {0}", assetID);
+                        // m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Importing by content hash: {0}", assetID);
                     }
 
                     m_PackManager.StoreAssetData(assetID, data, type, "Legacy Import " + assetID);
@@ -504,11 +493,36 @@ namespace OpenSim.Services.AdvancedAssetService
 
             try
             {
-                var unsynced = m_PackManager.GetUnsyncedAssets(100); // Batch of 100
-                if (unsynced.Count > 0)
+                if (m_log.IsDebugEnabled)
                 {
-                    m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Syncing {0} assets to grid database...", unsynced.Count);
-                    int count = 0;
+                    var unsynced = m_PackManager.GetUnsyncedAssets(100); // Batch of 100
+                    if (unsynced.Count > 0)
+                    {
+                        m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Syncing {0} assets to grid database...", unsynced.Count);
+                        int count = 0;
+                        foreach (var meta in unsynced)
+                        {
+                            AssetMetadata am = new AssetMetadata
+                            {
+                                FullID = new UUID(meta.UUID),
+                                ID = meta.UUID,
+                                Type = meta.Type,
+                                Name = meta.Name,
+                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+                            };
+
+                            if (m_GridConnector.Store(am, meta.Hash))
+                            {
+                                m_PackManager.MarkAsSynced(meta.UUID);
+                                count++;
+                            }
+                        }
+                        if (count > 0) m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Shadow Sync: {0} assets synchronized.", count);
+                    }
+                }
+                else
+                {
+                    var unsynced = m_PackManager.GetUnsyncedAssets(100);
                     foreach (var meta in unsynced)
                     {
                         AssetMetadata am = new AssetMetadata
@@ -519,14 +533,9 @@ namespace OpenSim.Services.AdvancedAssetService
                             Name = meta.Name,
                             CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
                         };
-
                         if (m_GridConnector.Store(am, meta.Hash))
-                        {
                             m_PackManager.MarkAsSynced(meta.UUID);
-                            count++;
-                        }
                     }
-                    if (count > 0) m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Shadow Sync: {0} assets synchronized.", count);
                 }
             }
             catch (Exception ex)
