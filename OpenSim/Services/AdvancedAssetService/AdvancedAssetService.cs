@@ -32,6 +32,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private Timer m_SyncTimer;
         private bool m_IsSyncing = false;
         private S3BackgroundReplicator m_S3Replicator;
+        private int m_ShadowSyncBatchSize = 1000;
 
         public AdvancedAssetService(IConfigSource config) : this(config, "AssetService")
         {
@@ -45,6 +46,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
             m_StoragePath = assetConfig.GetString("StoragePath", "asset_packs");
             m_VerifyOnRead = assetConfig.GetBoolean("VerifyOnRead", true);
+            m_ShadowSyncBatchSize = assetConfig.GetInt("ShadowSyncBatchSize", 1000);
 
             // Initialize Pack Manager
             m_PackManager = new PackFileManager(m_StoragePath);
@@ -92,6 +94,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas rebuild-index", "aas rebuild-index", "Rebuild the SQLite index from PackFiles", HandleRebuildIndex);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-cache", "aas import-cache <path>", "Bulk import assets from Flotsam file cache", HandleImportCache);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-s3", "aas sync-s3", "Force synchronization of assets with S3", HandleSyncS3);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-database", "aas sync-database", "Force full synchronization of assets with the grid database", HandleSyncDatabase);
         }
 
         public virtual AssetBase Get(string id)
@@ -344,6 +347,77 @@ namespace OpenSim.Services.AdvancedAssetService
             });
         }
 
+        private void HandleSyncDatabase(string module, string[] args)
+        {
+            if (m_GridConnector == null)
+            {
+                MainConsole.Instance.Output("Database synchronization (Shadow Sync) is not enabled.");
+                return;
+            }
+
+            if (m_IsSyncing)
+            {
+                MainConsole.Instance.Output("Synchronization is already in progress.");
+                return;
+            }
+
+            m_IsSyncing = true;
+            try
+            {
+                MainConsole.Instance.Output("Starting full database synchronization...");
+                int totalSynced = 0;
+                int batchSize = m_ShadowSyncBatchSize;
+                
+                while (true)
+                {
+                    var unsynced = m_PackManager.GetUnsyncedAssets(batchSize);
+                    if (unsynced.Count == 0)
+                        break;
+
+                    int count = 0;
+                    foreach (var meta in unsynced)
+                    {
+                        AssetMetadata am = new AssetMetadata
+                        {
+                            FullID = new UUID(meta.UUID),
+                            ID = meta.UUID,
+                            Type = meta.Type,
+                            Name = meta.Name,
+                            CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+                        };
+
+                        try
+                        {
+                            if (m_GridConnector.Store(am, meta.Hash))
+                            {
+                                m_PackManager.MarkAsSynced(meta.UUID);
+                                count++;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            m_log.Error("[ADVANCED ASSET SERVICE]: Error syncing asset: " + ex.Message);
+                        }
+                    }
+
+                    totalSynced += count;
+                    MainConsole.Instance.Output(string.Format("Synchronized {0} assets in this batch (Total: {1})...", count, totalSynced));
+
+                    if (count < unsynced.Count)
+                    {
+                        MainConsole.Instance.Output("Some assets failed to synchronize. Stopping full synchronization to avoid infinite loop.");
+                        break;
+                    }
+                }
+
+                MainConsole.Instance.Output(string.Format("Full database synchronization finished. Total assets synchronized: {0}", totalSynced));
+            }
+            finally
+            {
+                m_IsSyncing = false;
+            }
+        }
+
         private void HandleExportLegacy(string module, string[] args)
         {
             if (args.Length < 3)
@@ -495,7 +569,7 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 if (m_log.IsDebugEnabled)
                 {
-                    var unsynced = m_PackManager.GetUnsyncedAssets(100); // Batch of 100
+                    var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
                     if (unsynced.Count > 0)
                     {
                         m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Syncing {0} assets to grid database...", unsynced.Count);
@@ -522,7 +596,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
                 else
                 {
-                    var unsynced = m_PackManager.GetUnsyncedAssets(100);
+                    var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
                     foreach (var meta in unsynced)
                     {
                         AssetMetadata am = new AssetMetadata
