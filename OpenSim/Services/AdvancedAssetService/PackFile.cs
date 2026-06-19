@@ -59,6 +59,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private ConcurrentDictionary<string, PackFileIndexEntry> m_InFlightHashes = new ConcurrentDictionary<string, PackFileIndexEntry>();
         private Task m_WriteTask;
+        private object m_StoreLock = new object();
 
         public PackFileManager(string basePath)
         {
@@ -268,12 +269,11 @@ namespace OpenSim.Services.AdvancedAssetService
                 Tcs = new TaskCompletionSource<string>() 
             };
             
-            if (!m_PendingWritesCache.TryAdd(nid, op))
+            lock (m_StoreLock)
             {
-                return uuid;
+                m_PendingWritesCache[nid] = op;
+                m_WriteQueue.Add(op);
             }
-
-            m_WriteQueue.Add(op);
             return uuid;
         }
 
