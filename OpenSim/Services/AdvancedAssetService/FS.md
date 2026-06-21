@@ -21,6 +21,7 @@ O serviço pode ser gerenciado através do console do OpenSim usando o prefixo `
 * `aas export-asset <ID> <path>`: Exporta o conteúdo de um asset para um arquivo local.
 * `aas import-legacy <path>`: Importa em massa assets de uma estrutura de pastas no formato `FSAssetService` (.gz).
 * `aas import-raw <path>`: Importa em massa arquivos raw de assets não comprimidos nomeados por UUID.
+* `aas scan-inventory <path>`: Escaneia o banco de dados do inventário e importa assets ausentes no AAS a partir de uma pasta externa (suporta cache de região, assets legados e FSAsset).
 * `aas export-legacy <path>`: Exporta todos os assets do serviço para uma estrutura de pastas compatível com `FSAssetService`.
 
 ### Manutenção e Busca

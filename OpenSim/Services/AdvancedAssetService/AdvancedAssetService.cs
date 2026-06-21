@@ -34,6 +34,9 @@ namespace OpenSim.Services.AdvancedAssetService
         private S3BackgroundReplicator m_S3Replicator;
         private int m_ShadowSyncBatchSize = 1000;
 
+        protected string m_DatabaseProvider;
+        protected string m_DatabaseConnectionString;
+
         public AdvancedAssetService(IConfigSource config) : this(config, "AssetService")
         {
         }
@@ -55,6 +58,21 @@ namespace OpenSim.Services.AdvancedAssetService
             string dllName = assetConfig.GetString("StorageProvider", string.Empty);
             string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
             string realm = assetConfig.GetString("Realm", "fsassets");
+
+            m_DatabaseProvider = dllName;
+            m_DatabaseConnectionString = connectionString;
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                IConfig dbConfig = config.Configs["DatabaseService"];
+                if (dbConfig != null)
+                {
+                    if (string.IsNullOrEmpty(m_DatabaseProvider))
+                        m_DatabaseProvider = dbConfig.GetString("StorageProvider", string.Empty);
+                    if (string.IsNullOrEmpty(m_DatabaseConnectionString))
+                        m_DatabaseConnectionString = dbConfig.GetString("ConnectionString", string.Empty);
+                }
+            }
 
             if (!string.IsNullOrEmpty(dllName) && !string.IsNullOrEmpty(connectionString))
             {
@@ -97,6 +115,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-database", "aas sync-database", "Force full synchronization of assets with the grid database", HandleSyncDatabase);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-raw", "aas import-raw <path>", "Bulk import raw uncompressed assets named by UUID", HandleImportRaw);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path>", "Scan inventory database and import missing assets from an external folder", HandleScanInventory);
         }
 
         public virtual AssetBase Get(string id)
@@ -641,6 +660,280 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
             MainConsole.Instance.Output(string.Format("Total raw assets imported: {0} (skipped/non-UUID: {1})", count, skipped));
+        }
+
+        private void HandleScanInventory(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas scan-inventory <path>");
+                return;
+            }
+            string path = args[2];
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found: " + path);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("Database provider or connection string not configured.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Loading inventory database plugin...");
+            IXInventoryData invDatabase;
+            try
+            {
+                invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to load inventory database: " + ex.Message);
+                return;
+            }
+
+            if (invDatabase == null)
+            {
+                MainConsole.Instance.Output("Failed to instantiate inventory database plugin.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning inventory items from database...");
+            XInventoryItem[] items;
+            try
+            {
+                items = invDatabase.GetItems(new string[0], new string[0]);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to query inventory items: " + ex.Message);
+                return;
+            }
+
+            if (items == null || items.Length == 0)
+            {
+                MainConsole.Instance.Output("No items found in inventory.");
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} inventory items. Checking for missing assets in AAS...", items.Length));
+
+            HashSet<UUID> inventoryAssetIDs = new HashSet<UUID>();
+            Dictionary<UUID, XInventoryItem> itemMetadata = new Dictionary<UUID, XInventoryItem>();
+
+            foreach (var item in items)
+            {
+                if (item.assetID != UUID.Zero)
+                {
+                    inventoryAssetIDs.Add(item.assetID);
+                    if (!itemMetadata.ContainsKey(item.assetID))
+                    {
+                        itemMetadata[item.assetID] = item;
+                    }
+                }
+            }
+
+            List<UUID> missingIDs = new List<UUID>();
+            foreach (UUID assetID in inventoryAssetIDs)
+            {
+                if (!m_PackManager.AssetExists(assetID.ToString()))
+                {
+                    missingIDs.Add(assetID);
+                }
+            }
+
+            MainConsole.Instance.Output(string.Format("Total unique assets in inventory: {0}", inventoryAssetIDs.Count));
+            MainConsole.Instance.Output(string.Format("Assets missing in AAS:           {0}", missingIDs.Count));
+
+            if (missingIDs.Count == 0)
+            {
+                MainConsole.Instance.Output("No missing assets to import. AAS is fully up-to-date with inventory.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning external folder for asset files...");
+            string[] allFiles;
+            try
+            {
+                allFiles = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} files in external folder. Indexing files...", allFiles.Length));
+            
+            Dictionary<string, string> filesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string file in allFiles)
+            {
+                string filename = Path.GetFileName(file);
+                string normName = filename.ToLower().Replace("-", "");
+                filesByName[normName] = file;
+
+                if (filename.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+                {
+                    string withoutGz = filename.Substring(0, filename.Length - 3);
+                    string normWithoutGz = withoutGz.ToLower().Replace("-", "");
+                    filesByName[normWithoutGz] = file;
+
+                    if (withoutGz.Contains("."))
+                    {
+                        string uuidPart = withoutGz.Split('.')[0];
+                        string normUuidPart = uuidPart.ToLower().Replace("-", "");
+                        filesByName[normUuidPart] = file;
+                    }
+                }
+
+                string withoutExt = Path.GetFileNameWithoutExtension(file);
+                string normWithoutExt = withoutExt.ToLower().Replace("-", "");
+                filesByName[normWithoutExt] = file;
+                if (withoutExt.Contains("."))
+                {
+                    string uuidPart = withoutExt.Split('.')[0];
+                    string normUuidPart = uuidPart.ToLower().Replace("-", "");
+                    filesByName[normUuidPart] = file;
+                }
+            }
+
+            MainConsole.Instance.Output("Searching and importing missing assets...");
+
+            int importedCount = 0;
+            int notFoundCount = 0;
+            int errorCount = 0;
+
+            #pragma warning disable SYSLIB0011
+            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+            #pragma warning restore SYSLIB0011
+
+            foreach (UUID assetID in missingIDs)
+            {
+                try
+                {
+                    string normUuid = assetID.ToString().ToLower().Replace("-", "");
+                    string matchedFilePath = null;
+
+                    // 1. Try to fetch metadata and content hash from the MySQL/grid database
+                    string dbHash = null;
+                    sbyte type = (sbyte)AssetType.Unknown;
+                    string name = null;
+
+                    if (m_GridConnector != null)
+                    {
+                        try
+                        {
+                            string existingHash;
+                            AssetMetadata dbMeta = m_GridConnector.Get(assetID.ToString(), out existingHash);
+                            if (dbMeta != null)
+                            {
+                                type = dbMeta.Type;
+                                name = dbMeta.Name;
+                                dbHash = existingHash;
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // Fallback to inventory item metadata if grid database doesn't have it
+                    if (name == null)
+                    {
+                        if (itemMetadata.TryGetValue(assetID, out XInventoryItem item))
+                        {
+                            type = (sbyte)item.assetType;
+                            name = item.inventoryName;
+                        }
+                        else
+                        {
+                            name = "Restored Inventory Asset " + normUuid;
+                        }
+                    }
+
+                    // 2. Locate file in the indexed external files
+                    // First search by UUID (normalized)
+                    if (filesByName.TryGetValue(normUuid, out string fileByUuid))
+                    {
+                        matchedFilePath = fileByUuid;
+                    }
+                    // If content hash was found, search by Hash
+                    else if (!string.IsNullOrEmpty(dbHash))
+                    {
+                        string normHash = dbHash.ToLower().Replace("-", "");
+                        if (filesByName.TryGetValue(normHash, out string fileByHash))
+                        {
+                            matchedFilePath = fileByHash;
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(matchedFilePath))
+                    {
+                        notFoundCount++;
+                        continue;
+                    }
+
+                    // 3. Read and import the file
+                    byte[] extData = null;
+                    string ext = Path.GetExtension(matchedFilePath).ToLower();
+
+                    if (ext == ".gz")
+                    {
+                        using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            gz.CopyTo(ms);
+                            extData = ms.ToArray();
+                        }
+                    }
+                    else
+                    {
+                        byte[] fileBytes = File.ReadAllBytes(matchedFilePath);
+                        // Check if it is Flotsam BinaryFormatter serialized cache file
+                        bool isFlotsam = false;
+                        if (fileBytes.Length > 9 && fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && fileBytes[4] == 0x00 && fileBytes[5] == 0xff && fileBytes[6] == 0xff && fileBytes[7] == 0xff && fileBytes[8] == 0xff)
+                        {
+                            isFlotsam = true;
+                        }
+
+                        if (isFlotsam)
+                        {
+                            #pragma warning disable SYSLIB0011
+                            using (MemoryStream ms = new MemoryStream(fileBytes))
+                            {
+                                AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
+                                extData = asset?.Data;
+                            }
+                            #pragma warning restore SYSLIB0011
+                        }
+                        else
+                        {
+                            extData = fileBytes;
+                        }
+                    }
+
+                    if (extData == null || extData.Length == 0)
+                    {
+                        errorCount++;
+                        continue;
+                    }
+
+                    m_PackManager.StoreAssetData(assetID.ToString(), extData, type, name);
+                    importedCount++;
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Error restoring inventory asset {0}: {1}", assetID, ex.Message));
+                    errorCount++;
+                }
+            }
+
+            MainConsole.Instance.Output("--- Inventory Scan & Import Summary ---");
+            MainConsole.Instance.Output(string.Format("Assets Missing in AAS:   {0}", missingIDs.Count));
+            MainConsole.Instance.Output(string.Format("Successfully Restored:   {0}", importedCount));
+            MainConsole.Instance.Output(string.Format("Not Found in External:   {0}", notFoundCount));
+            MainConsole.Instance.Output(string.Format("Errors during Import:    {0}", errorCount));
         }
 
         private void HandleSyncDatabase(string module, string[] args)
