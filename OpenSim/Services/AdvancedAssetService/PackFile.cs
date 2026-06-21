@@ -236,7 +236,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     
                     if (version >= 2) br.ReadInt64(); // Skip CreationDate in reader for now
                     
-                    fs.Seek(br.ReadUInt16(), SeekOrigin.Current); // Skip Name
+                    ushort nameLen = br.ReadUInt16();
+                    br.ReadBytes(nameLen); // Skip Name
                     int dataLen = br.ReadInt32();
                     byte[] data = br.ReadBytes(dataLen);
                     

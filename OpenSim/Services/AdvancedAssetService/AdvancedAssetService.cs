@@ -95,6 +95,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-cache", "aas import-cache <path>", "Bulk import assets from Flotsam file cache", HandleImportCache);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-s3", "aas sync-s3", "Force synchronization of assets with S3", HandleSyncS3);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-database", "aas sync-database", "Force full synchronization of assets with the grid database", HandleSyncDatabase);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
         }
 
         public virtual AssetBase Get(string id)
@@ -345,6 +346,200 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 m_S3Replicator.ForceSync(msg => MainConsole.Instance.Output(msg));
             });
+        }
+
+        private void HandleCompare(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas compare <path>");
+                return;
+            }
+            string path = args[2];
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found: " + path);
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning external folder for assets...");
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} files. Loading AAS asset records...", files.Length));
+            
+            var allAasAssets = m_PackManager.GetAllAssets();
+            Dictionary<string, string> aasUuidToHash = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> aasHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var record in allAasAssets)
+            {
+                aasUuidToHash[record.UUID] = record.Hash;
+                aasHashes.Add(record.Hash);
+            }
+
+            MainConsole.Instance.Output(string.Format("AAS has {0} total asset UUIDs and {1} unique content hashes indexed.", aasUuidToHash.Count, aasHashes.Count));
+            MainConsole.Instance.Output("Comparing assets...");
+
+            int totalExternal = 0;
+            int matched = 0;
+            int mismatched = 0;
+            int missingInAas = 0;
+            int errorCount = 0;
+
+            #pragma warning disable SYSLIB0011
+            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+            #pragma warning restore SYSLIB0011
+
+            foreach (string file in files)
+            {
+                // Skip index.db or pack files if the user points to an AAS storage path
+                string filenameWithExt = Path.GetFileName(file);
+                if (filenameWithExt == "index.db" || (filenameWithExt.StartsWith("pack_") && filenameWithExt.EndsWith(".bin")))
+                {
+                    continue;
+                }
+
+                totalExternal++;
+                try
+                {
+                    string filename = Path.GetFileNameWithoutExtension(file);
+                    string ext = Path.GetExtension(file).ToLower();
+
+                    // Identify if the filename represents a UUID or a Hash
+                    string assetID = filename;
+                    if (filename.Contains("."))
+                    {
+                        string[] parts = filename.Split('.');
+                        assetID = parts[0];
+                    }
+
+                    string normalizedID = assetID.ToLower().Replace("-", "");
+                    bool isHash = normalizedID.Length == 64; // SHA256 hex is 64 chars
+
+                    byte[] extData = null;
+                    if (ext == ".gz")
+                    {
+                        using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            gz.CopyTo(ms);
+                            extData = ms.ToArray();
+                        }
+                    }
+                    else
+                    {
+                        byte[] fileBytes = File.ReadAllBytes(file);
+                        // Check if it's Flotsam BinaryFormatter serialized cache file
+                        bool isFlotsam = false;
+                        if (fileBytes.Length > 9 && fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && fileBytes[4] == 0x00 && fileBytes[5] == 0xff && fileBytes[6] == 0xff && fileBytes[7] == 0xff && fileBytes[8] == 0xff)
+                        {
+                            isFlotsam = true;
+                        }
+
+                        if (isFlotsam)
+                        {
+                            #pragma warning disable SYSLIB0011
+                            using (MemoryStream ms = new MemoryStream(fileBytes))
+                            {
+                                AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
+                                extData = asset?.Data;
+                            }
+                            #pragma warning restore SYSLIB0011
+                        }
+                        else
+                        {
+                            extData = fileBytes;
+                        }
+                    }
+
+                    if (extData == null)
+                    {
+                        MainConsole.Instance.Output(string.Format("[ERROR] Could not read asset data from {0}", filenameWithExt));
+                        errorCount++;
+                        continue;
+                    }
+
+                    // Compute SHA256 hash of external asset data
+                    string extHash;
+                    using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+                    {
+                        extHash = BitConverter.ToString(sha.ComputeHash(extData)).Replace("-", "").ToLower();
+                    }
+
+                    if (isHash)
+                    {
+                        // Deduplicated file by Hash
+                        if (aasHashes.Contains(normalizedID))
+                        {
+                            if (normalizedID == extHash)
+                            {
+                                matched++;
+                            }
+                            else
+                            {
+                                mismatched++;
+                                MainConsole.Instance.Output(string.Format("[MISMATCH] Hash file {0} has content hash {1} instead of {2}", filenameWithExt, extHash, normalizedID));
+                            }
+                        }
+                        else
+                        {
+                            missingInAas++;
+                            MainConsole.Instance.Output(string.Format("[MISSING] AAS is missing data for hash {0} (found in {1})", normalizedID, filenameWithExt));
+                        }
+                    }
+                    else
+                    {
+                        // File by UUID
+                        if (aasUuidToHash.TryGetValue(normalizedID, out string aasHash))
+                        {
+                            if (aasHash == extHash)
+                            {
+                                matched++;
+                            }
+                            else
+                            {
+                                mismatched++;
+                                MainConsole.Instance.Output(string.Format("[CORRUPTED/MISMATCH] UUID {0} ({1}) has content hash {2} in external, but AAS records hash {3}", normalizedID, filenameWithExt, extHash, aasHash));
+                            }
+                        }
+                        else
+                        {
+                            if (aasHashes.Contains(extHash))
+                            {
+                                missingInAas++;
+                                MainConsole.Instance.Output(string.Format("[MISSING LINK] UUID {0} ({1}) not in AAS, but its content hash {2} exists in AAS.", normalizedID, filenameWithExt, extHash));
+                            }
+                            else
+                            {
+                                missingInAas++;
+                                MainConsole.Instance.Output(string.Format("[MISSING] UUID {0} ({1}) and its content hash {2} are completely missing in AAS.", normalizedID, filenameWithExt, extHash));
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output(string.Format("[ERROR] Failed to compare file {0}: {1}", filenameWithExt, ex.Message));
+                    errorCount++;
+                }
+            }
+
+            MainConsole.Instance.Output("--- Comparison Summary ---");
+            MainConsole.Instance.Output(string.Format("Total Files Checked:       {0}", totalExternal));
+            MainConsole.Instance.Output(string.Format("Identical Match (Valid):    {0}", matched));
+            MainConsole.Instance.Output(string.Format("Content Mismatch/Corrupt:  {0}", mismatched));
+            MainConsole.Instance.Output(string.Format("Missing in AAS:            {0}", missingInAas));
+            MainConsole.Instance.Output(string.Format("Errors processing files:   {0}", errorCount));
         }
 
         private void HandleSyncDatabase(string module, string[] args)
