@@ -96,6 +96,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-s3", "aas sync-s3", "Force synchronization of assets with S3", HandleSyncS3);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-database", "aas sync-database", "Force full synchronization of assets with the grid database", HandleSyncDatabase);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-raw", "aas import-raw <path>", "Bulk import raw uncompressed assets named by UUID", HandleImportRaw);
         }
 
         public virtual AssetBase Get(string id)
@@ -540,6 +541,106 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Output(string.Format("Content Mismatch/Corrupt:  {0}", mismatched));
             MainConsole.Instance.Output(string.Format("Missing in AAS:            {0}", missingInAas));
             MainConsole.Instance.Output(string.Format("Errors processing files:   {0}", errorCount));
+        }
+
+        private void HandleImportRaw(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas import-raw <path>");
+                return;
+            }
+            string path = args[2];
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found: " + path);
+                return;
+            }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} files to scan.", files.Length));
+
+            int count = 0;
+            int skipped = 0;
+            foreach (string file in files)
+            {
+                try
+                {
+                    string filename = Path.GetFileName(file);
+                    
+                    // Skip system files like index.db, or pack files
+                    if (filename == "index.db" || (filename.StartsWith("pack_") && filename.EndsWith(".bin")))
+                    {
+                        continue;
+                    }
+
+                    sbyte type = (sbyte)AssetType.Unknown;
+                    string assetID = filename;
+
+                    if (filename.Contains("."))
+                    {
+                        string[] parts = filename.Split('.');
+                        assetID = parts[0];
+                        if (parts.Length > 1 && sbyte.TryParse(parts[1], out sbyte t))
+                            type = t;
+                    }
+
+                    string normalizedID = assetID.ToLower().Replace("-", "");
+                    string name = "Raw Import " + normalizedID;
+
+                    if (!UUID.TryParse(normalizedID, out UUID id))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    // Query the grid database (MySQL) to fetch original metadata if available
+                    if (m_GridConnector != null)
+                    {
+                        try
+                        {
+                            string existingHash;
+                            AssetMetadata dbMeta = m_GridConnector.Get(id.ToString(), out existingHash);
+                            if (dbMeta != null)
+                            {
+                                type = dbMeta.Type;
+                                name = dbMeta.Name;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Failed to query grid database for metadata of {0}: {1}", id, ex.Message);
+                        }
+                    }
+
+                    byte[] data = File.ReadAllBytes(file);
+                    if (data == null || data.Length == 0)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    // StoreAssetData expects the UUID format (normalized or formatted, Store handles both)
+                    m_PackManager.StoreAssetData(id.ToString(), data, type, name);
+                    count++;
+                    if (count % 100 == 0) MainConsole.Instance.Output(string.Format("Imported {0} raw assets...", count));
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Error importing raw asset {0}: {1}", file, ex.Message));
+                }
+            }
+            MainConsole.Instance.Output(string.Format("Total raw assets imported: {0} (skipped/non-UUID: {1})", count, skipped));
         }
 
         private void HandleSyncDatabase(string module, string[] args)
