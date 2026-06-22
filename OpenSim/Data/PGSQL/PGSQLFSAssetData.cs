@@ -311,6 +311,26 @@ namespace OpenSim.Data.PGSQL
             MainConsole.Instance.Output(String.Format("Import done, {0} assets imported", imported));
         }
 
+        public string GetUUIDByHash(string hash)
+        {
+            string id = null;
+            string query = String.Format("select \"id\" from {0} where \"hash\" = :hash limit 1", m_Table);
+            using (NpgsqlConnection dbcon = new NpgsqlConnection(m_connectionString))
+            using (NpgsqlCommand cmd = new NpgsqlCommand(query, dbcon))
+            {
+                dbcon.Open();
+                cmd.Parameters.Add(m_database.CreateParameter("hash", hash));
+                using (NpgsqlDataReader reader = cmd.ExecuteReader(CommandBehavior.Default))
+                {
+                    if (reader.Read())
+                    {
+                        id = reader["id"].ToString();
+                    }
+                }
+            }
+            return id;
+        }
+
         #endregion
     }
 }

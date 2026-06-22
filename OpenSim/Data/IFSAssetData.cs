@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -43,5 +43,6 @@ namespace OpenSim.Data
         bool            Store(AssetMetadata metadata, string hash);
         void            Import(string conn, string table, int start, int count, bool force, FSStoreDelegate store);
         int             Count();
+        string          GetUUIDByHash(string hash);
     }
 }

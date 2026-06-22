@@ -428,6 +428,39 @@ namespace OpenSim.Data.MySQL
             MainConsole.Instance.Output(String.Format("Import done, {0} assets imported", imported));
         }
 
+        public string GetUUIDByHash(string hash)
+        {
+            string id = null;
+            using (MySqlConnection conn = new MySqlConnection(m_ConnectionString))
+            {
+                try
+                {
+                    conn.Open();
+                }
+                catch (MySqlException e)
+                {
+                    m_log.ErrorFormat("[FSASSETS]: Database open failed with {0}", e.ToString());
+                    return null;
+                }
+
+                using (MySqlCommand cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = String.Format("select id from {0} where hash = ?hash limit 1", m_Table);
+                    cmd.Parameters.AddWithValue("?hash", hash);
+
+                    using (IDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            id = reader["id"].ToString();
+                        }
+                    }
+                }
+                conn.Close();
+            }
+            return id;
+        }
+
         #endregion
     }
 }

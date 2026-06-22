@@ -271,15 +271,33 @@ namespace OpenSim.Services.AdvancedAssetService
                         data = ms.ToArray();
                     }
 
-                    // If it's a Hash (64 chars hex), we use it as ID if no UUID is present
-                    // In a real FSAsset restoration, you'd want to restore the SQL DB too.
+                    // Validate UUID. If it's a hash (e.g. 64 chars long) or invalid UUID, try to lookup in grid database
                     if (!UUID.TryParse(assetID, out UUID id))
                     {
-                        // It's a hash or invalid ID. 
-                        // To preserve links, the original UUID MUST be used.
-                        // If we only have the hash, we use it as ID (OpenSim will handle it if the caller knows this ID)
-                        // m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Importing by content hash: {0}", assetID);
+                        string foundUUID = null;
+                        if (m_GridConnector != null)
+                        {
+                            try
+                            {
+                                foundUUID = m_GridConnector.GetUUIDByHash(assetID);
+                            }
+                            catch (Exception ex)
+                            {
+                                m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Failed to query grid database for UUID of hash {0}: {1}", assetID, ex.Message);
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(foundUUID) && UUID.TryParse(foundUUID, out id))
+                        {
+                            m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Resolved hash '{0}' to UUID '{1}' via grid database", assetID, id);
+                        }
+                        else
+                        {
+                            m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Skipping legacy import for '{0}' (not a valid UUID and not found in grid database)", filename);
+                            continue;
+                        }
                     }
+                    assetID = id.ToString();
 
                     m_PackManager.StoreAssetData(assetID, data, type, "Legacy Import " + assetID);
                     count++;
@@ -966,6 +984,14 @@ namespace OpenSim.Services.AdvancedAssetService
                     int count = 0;
                     foreach (var meta in unsynced)
                     {
+                        if (meta.UUID.Length > 36)
+                        {
+                            m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
+                            m_PackManager.MarkAsSynced(meta.UUID);
+                            count++;
+                            continue;
+                        }
+
                         AssetMetadata am = new AssetMetadata
                         {
                             FullID = new UUID(meta.UUID),
@@ -1165,6 +1191,14 @@ namespace OpenSim.Services.AdvancedAssetService
                         int count = 0;
                         foreach (var meta in unsynced)
                         {
+                            if (meta.UUID.Length > 36)
+                            {
+                                m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
+                                m_PackManager.MarkAsSynced(meta.UUID);
+                                count++;
+                                continue;
+                            }
+
                             AssetMetadata am = new AssetMetadata
                             {
                                 FullID = new UUID(meta.UUID),
@@ -1188,6 +1222,13 @@ namespace OpenSim.Services.AdvancedAssetService
                     var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
                     foreach (var meta in unsynced)
                     {
+                        if (meta.UUID.Length > 36)
+                        {
+                            m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
+                            m_PackManager.MarkAsSynced(meta.UUID);
+                            continue;
+                        }
+
                         AssetMetadata am = new AssetMetadata
                         {
                             FullID = new UUID(meta.UUID),
