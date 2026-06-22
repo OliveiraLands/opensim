@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using OpenMetaverse;
 using log4net;
 using System.Reflection;
+using OpenSim.Data;
 
 namespace OpenSim.Services.AdvancedAssetService
 {
@@ -871,28 +872,38 @@ namespace OpenSim.Services.AdvancedAssetService
                 output("STATUS: ISSUES DETECTED.");
         }
 
-        public void Defragment(Action<string> output)
+        private class DefragRecord
+        {
+            public string UUID;
+            public string Hash;
+            public int PackFileID;
+            public long Offset;
+            public int Length;
+        }
+
+        public void Defragment(IFSAssetDataPlugin gridConnector, Action<string> output)
         {
             output("Starting AdvancedAssetService PackFile Defragmentation...");
             lock (m_Lock)
             {
                 FlushBatch();
                 
-                // 1. Get all active hashes (that are pointed to by asset_map)
-                List<PackFileIndexEntry> activeEntries = new List<PackFileIndexEntry>();
+                // 1. Get all active mappings (UUID -> Hash) and their physical entries
+                List<DefragRecord> activeEntries = new List<DefragRecord>();
                 using (var cmd = m_Connection.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT DISTINCT ia.hash, ia.pack_id, ia.offset, ia.length FROM index_assets ia INNER JOIN asset_map am ON am.hash = ia.hash";
+                    cmd.CommandText = "SELECT am.uuid, ia.hash, ia.pack_id, ia.offset, ia.length FROM index_assets ia INNER JOIN asset_map am ON am.hash = ia.hash";
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
                         {
-                            activeEntries.Add(new PackFileIndexEntry
+                            activeEntries.Add(new DefragRecord
                             {
-                                Hash = reader.GetString(0),
-                                PackFileID = reader.GetInt32(1),
-                                Offset = reader.GetInt64(2),
-                                Length = reader.GetInt32(3)
+                                UUID = reader.GetString(0),
+                                Hash = reader.GetString(1),
+                                PackFileID = reader.GetInt32(2),
+                                Offset = reader.GetInt64(3),
+                                Length = reader.GetInt32(4)
                             });
                         }
                     }
@@ -915,6 +926,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 long currentDestOffset = 0;
 
                 List<PackFileIndexEntry> newEntries = new List<PackFileIndexEntry>();
+                List<AssetMetadataRecord> newMapEntries = new List<AssetMetadataRecord>();
                 Dictionary<int, FileStream> openSourcePacks = new Dictionary<int, FileStream>();
 
                 FileStream destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -960,6 +972,40 @@ namespace OpenSim.Services.AdvancedAssetService
                                 int dataLen = sourceBr.ReadInt32();
                                 byte[] dataBytes = sourceBr.ReadBytes(dataLen);
 
+                                string name = Encoding.UTF8.GetString(nameBytes);
+
+                                // Check if UUID is invalid (e.g. SHA-256 hash of 64 chars) and try to repair it via MySQL
+                                string correctedUuid = entry.UUID;
+                                if (entry.UUID.Length > 36)
+                                {
+                                    string resolvedUuid = null;
+                                    if (gridConnector != null)
+                                    {
+                                        try
+                                        {
+                                            resolvedUuid = gridConnector.GetUUIDByHash(entry.Hash);
+                                        }
+                                        catch {}
+                                    }
+
+                                    if (!string.IsNullOrEmpty(resolvedUuid) && UUID.TryParse(resolvedUuid, out UUID dummyId))
+                                    {
+                                        correctedUuid = dummyId.ToString().ToLower().Replace("-", "");
+                                        output(string.Format("Defrag Resolved invalid UUID '{0}' to correct UUID '{1}' via grid database.", entry.UUID, dummyId));
+                                    }
+                                    else
+                                    {
+                                        output(string.Format("Defrag Skipping invalid UUID '{0}' (no mapping found in grid database).", entry.UUID));
+                                        continue;
+                                    }
+                                }
+
+                                byte[] finalUuidBytes = uuidBytes;
+                                if (correctedUuid != entry.UUID)
+                                {
+                                    finalUuidBytes = new UUID(correctedUuid).GetBytes();
+                                }
+
                                 // Write to dest pack
                                 if (destFs.Position > m_MaxPackSize)
                                 {
@@ -974,7 +1020,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                 currentDestOffset = destFs.Position;
                                 destBw.Write(MAGIC_NUMBER);
                                 destBw.Write(version);
-                                destBw.Write(uuidBytes);
+                                destBw.Write(finalUuidBytes);
                                 destBw.Write(type);
                                 if (version >= 2) destBw.Write(created);
                                 destBw.Write(nameLen);
@@ -988,6 +1034,15 @@ namespace OpenSim.Services.AdvancedAssetService
                                     PackFileID = currentDestPackId,
                                     Offset = currentDestOffset,
                                     Length = dataLen
+                                });
+
+                                newMapEntries.Add(new AssetMetadataRecord
+                                {
+                                    UUID = correctedUuid,
+                                    Hash = entry.Hash,
+                                    Type = type,
+                                    Name = name,
+                                    Created = created
                                 });
                             }
                         }
@@ -1028,7 +1083,7 @@ namespace OpenSim.Services.AdvancedAssetService
                         {
                             using (var cmd = m_Connection.CreateCommand())
                             {
-                                cmd.CommandText = "DELETE FROM index_assets";
+                                cmd.CommandText = "DELETE FROM index_assets; DELETE FROM asset_map;";
                                 cmd.ExecuteNonQuery();
 
                                 cmd.CommandText = "INSERT INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
@@ -1042,8 +1097,17 @@ namespace OpenSim.Services.AdvancedAssetService
                                     cmd.ExecuteNonQuery();
                                 }
 
-                                cmd.CommandText = "DELETE FROM asset_map WHERE hash NOT IN (SELECT hash FROM index_assets)";
-                                cmd.ExecuteNonQuery();
+                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 1)";
+                                foreach (var nm in newMapEntries)
+                                {
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, nm.UUID);
+                                    cmd.Parameters.AddWithValue(null, nm.Hash);
+                                    cmd.Parameters.AddWithValue(null, (int)nm.Type);
+                                    cmd.Parameters.AddWithValue(null, nm.Name);
+                                    cmd.Parameters.AddWithValue(null, nm.Created);
+                                    cmd.ExecuteNonQuery();
+                                }
 
                                 m_CurrentPackID = currentDestPackId;
                                 cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";

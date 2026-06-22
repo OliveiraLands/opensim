@@ -961,7 +961,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 MainConsole.Instance.Output("Aborted.");
                 return;
             }
-            m_PackManager.Defragment(msg => MainConsole.Instance.Output("AAS Defrag: " + msg));
+            m_PackManager.Defragment(m_GridConnector, msg => MainConsole.Instance.Output("AAS Defrag: " + msg));
         }
 
         private void HandleDeepRepair(string module, string[] args)
