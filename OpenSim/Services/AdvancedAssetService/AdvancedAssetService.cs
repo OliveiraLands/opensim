@@ -248,9 +248,21 @@ namespace OpenSim.Services.AdvancedAssetService
             string[] files = SafeGetFiles(path).FindAll(f => f.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)).ToArray();
             MainConsole.Instance.Output($"Found {files.Length} assets to import.");
 
-            int count = 0;
-            foreach (string file in files)
+            int startIndex = m_PackManager.PromptResumeProgress("import-legacy", path, files.Length, out bool resume);
+            if (!resume)
             {
+                m_PackManager.StartCommandProgress("import-legacy", path, files.Length);
+            }
+
+            int count = 0;
+            for (int i = startIndex; i < files.Length; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Legacy import aborted by user.");
+                    return;
+                }
+                string file = files[i];
                 try
                 {
                     string filename = Path.GetFileNameWithoutExtension(file);
@@ -298,6 +310,7 @@ namespace OpenSim.Services.AdvancedAssetService
                         else
                         {
                             m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Skipping legacy import for '{0}' (not a valid UUID and not found in grid database)", filename);
+                            m_PackManager.UpdateCommandProgress("import-legacy", i + 1);
                             continue;
                         }
                     }
@@ -311,7 +324,9 @@ namespace OpenSim.Services.AdvancedAssetService
                 {
                     m_log.Error($"[ADVANCED ASSET SERVICE]: Error importing {file}: {ex.Message}");
                 }
+                m_PackManager.UpdateCommandProgress("import-legacy", i + 1);
             }
+            m_PackManager.ClearCommandProgress("import-legacy");
             MainConsole.Instance.Output($"Total imported: {count}");
         }
 
@@ -332,27 +347,45 @@ namespace OpenSim.Services.AdvancedAssetService
             string[] files = SafeGetFiles(path).ToArray();
             MainConsole.Instance.Output(string.Format("Found {0} files. Scanning for Flotsam cache assets...", files.Length));
 
-            int totalScanned = 0;
+            List<string> cacheFiles = new List<string>();
+            foreach (string file in files)
+            {
+                if (UUID.TryParse(Path.GetFileName(file), out _))
+                {
+                    cacheFiles.Add(file);
+                }
+            }
+
+            int startIndex = m_PackManager.PromptResumeProgress("import-cache", path, cacheFiles.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("import-cache", path, cacheFiles.Count);
+            }
+
             int successCount = 0;
 
             #pragma warning disable SYSLIB0011
             System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
 
-            foreach (string file in files)
+            for (int i = startIndex; i < cacheFiles.Count; i++)
             {
-                string filename = Path.GetFileName(file);
-                if (!UUID.TryParse(filename, out UUID assetID))
+                if (m_PackManager.CheckUserAbort())
                 {
-                    continue;
+                    MainConsole.Instance.Output("Cache import aborted by user.");
+                    return;
                 }
-
-                totalScanned++;
+                string file = cacheFiles[i];
+                string filename = Path.GetFileName(file);
 
                 try
                 {
                     using (FileStream fs = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.Read))
                     {
-                        if (fs.Length == 0) continue;
+                        if (fs.Length == 0)
+                        {
+                            m_PackManager.UpdateCommandProgress("import-cache", i + 1);
+                            continue;
+                        }
 
                         AssetBase asset = (AssetBase)bformatter.Deserialize(fs);
                         if (asset != null)
@@ -370,10 +403,12 @@ namespace OpenSim.Services.AdvancedAssetService
                 {
                     m_log.Debug(string.Format("[ADVANCED ASSET SERVICE]: Error importing cache file {0}: {1}", filename, ex.Message));
                 }
+                m_PackManager.UpdateCommandProgress("import-cache", i + 1);
             }
             #pragma warning restore SYSLIB0011
 
-            MainConsole.Instance.Output(string.Format("Import scan finished. Scanned {0} UUID files. Successfully imported {1} assets to AdvancedAssetService.", totalScanned, successCount));
+            m_PackManager.ClearCommandProgress("import-cache");
+            MainConsole.Instance.Output(string.Format("Import scan finished. Scanned {0} UUID files. Successfully imported {1} assets to AdvancedAssetService.", cacheFiles.Count, successCount));
         }
 
         private void HandleSyncS3(string module, string[] args)
@@ -431,26 +466,57 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Output(string.Format("AAS has {0} total asset UUIDs and {1} unique content hashes indexed.", aasUuidToHash.Count, aasHashes.Count));
             MainConsole.Instance.Output("Comparing assets...");
 
-            int totalExternal = 0;
-            int matched = 0;
-            int mismatched = 0;
-            int missingInAas = 0;
-            int errorCount = 0;
-
-            #pragma warning disable SYSLIB0011
-            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
-            #pragma warning restore SYSLIB0011
-
+            List<string> compareFiles = new List<string>();
             foreach (string file in files)
             {
-                // Skip index.db or pack files if the user points to an AAS storage path
                 string filenameWithExt = Path.GetFileName(file);
                 if (filenameWithExt == "index.db" || (filenameWithExt.StartsWith("pack_") && filenameWithExt.EndsWith(".bin")))
                 {
                     continue;
                 }
+                compareFiles.Add(file);
+            }
 
-                totalExternal++;
+            int matched = 0;
+            int mismatched = 0;
+            int missingInAas = 0;
+            int errorCount = 0;
+
+            int startIndex = m_PackManager.PromptResumeProgress("compare", path, compareFiles.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("compare", path, compareFiles.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:compare:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 4)
+                    {
+                        int.TryParse(parts[0], out matched);
+                        int.TryParse(parts[1], out mismatched);
+                        int.TryParse(parts[2], out missingInAas);
+                        int.TryParse(parts[3], out errorCount);
+                    }
+                }
+            }
+
+            #pragma warning disable SYSLIB0011
+            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+            #pragma warning restore SYSLIB0011
+
+            for (int i = startIndex; i < compareFiles.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Comparison aborted by user.");
+                    return;
+                }
+                string file = compareFiles[i];
+                string filenameWithExt = Path.GetFileName(file);
+
                 try
                 {
                     string filename = Path.GetFileNameWithoutExtension(file);
@@ -508,6 +574,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     {
                         MainConsole.Instance.Output(string.Format("[ERROR] Could not read asset data from {0}", filenameWithExt));
                         errorCount++;
+                        m_PackManager.UpdateCommandProgress("compare", i + 1);
+                        m_PackManager.SetConfig("cmd_state:compare:metadata", string.Format("{0},{1},{2},{3}", matched, mismatched, missingInAas, errorCount));
                         continue;
                     }
 
@@ -574,10 +642,14 @@ namespace OpenSim.Services.AdvancedAssetService
                     MainConsole.Instance.Output(string.Format("[ERROR] Failed to compare file {0}: {1}", filenameWithExt, ex.Message));
                     errorCount++;
                 }
+                m_PackManager.UpdateCommandProgress("compare", i + 1);
+                m_PackManager.SetConfig("cmd_state:compare:metadata", string.Format("{0},{1},{2},{3}", matched, mismatched, missingInAas, errorCount));
             }
 
+            m_PackManager.ClearCommandProgress("compare");
+
             MainConsole.Instance.Output("--- Comparison Summary ---");
-            MainConsole.Instance.Output(string.Format("Total Files Checked:       {0}", totalExternal));
+            MainConsole.Instance.Output(string.Format("Total Files Checked:       {0}", compareFiles.Count));
             MainConsole.Instance.Output(string.Format("Identical Match (Valid):    {0}", matched));
             MainConsole.Instance.Output(string.Format("Content Mismatch/Corrupt:  {0}", mismatched));
             MainConsole.Instance.Output(string.Format("Missing in AAS:            {0}", missingInAas));
@@ -611,20 +683,53 @@ namespace OpenSim.Services.AdvancedAssetService
 
             MainConsole.Instance.Output(string.Format("Found {0} files to scan.", files.Length));
 
-            int count = 0;
-            int skipped = 0;
+            List<string> rawFiles = new List<string>();
             foreach (string file in files)
             {
+                string filename = Path.GetFileName(file);
+                
+                // Skip system files like index.db, or pack files
+                if (filename == "index.db" || (filename.StartsWith("pack_") && filename.EndsWith(".bin")))
+                {
+                    continue;
+                }
+
+                sbyte type = (sbyte)AssetType.Unknown;
+                string assetID = filename;
+
+                if (filename.Contains("."))
+                {
+                    string[] parts = filename.Split('.');
+                    assetID = parts[0];
+                }
+
+                string normalizedID = assetID.ToLower().Replace("-", "");
+
+                if (UUID.TryParse(normalizedID, out _))
+                {
+                    rawFiles.Add(file);
+                }
+            }
+
+            int startIndex = m_PackManager.PromptResumeProgress("import-raw", path, rawFiles.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("import-raw", path, rawFiles.Count);
+            }
+
+            int count = 0;
+            int skipped = 0;
+            for (int i = startIndex; i < rawFiles.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Raw import aborted by user.");
+                    return;
+                }
+                string file = rawFiles[i];
                 try
                 {
                     string filename = Path.GetFileName(file);
-                    
-                    // Skip system files like index.db, or pack files
-                    if (filename == "index.db" || (filename.StartsWith("pack_") && filename.EndsWith(".bin")))
-                    {
-                        continue;
-                    }
-
                     sbyte type = (sbyte)AssetType.Unknown;
                     string assetID = filename;
 
@@ -638,12 +743,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
                     string normalizedID = assetID.ToLower().Replace("-", "");
                     string name = "Raw Import " + normalizedID;
-
-                    if (!UUID.TryParse(normalizedID, out UUID id))
-                    {
-                        skipped++;
-                        continue;
-                    }
+                    UUID id = new UUID(normalizedID);
 
                     // Query the grid database (MySQL) to fetch original metadata if available
                     if (m_GridConnector != null)
@@ -668,6 +768,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     if (data == null || data.Length == 0)
                     {
                         skipped++;
+                        m_PackManager.UpdateCommandProgress("import-raw", i + 1);
                         continue;
                     }
 
@@ -680,7 +781,9 @@ namespace OpenSim.Services.AdvancedAssetService
                 {
                     m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Error importing raw asset {0}: {1}", file, ex.Message));
                 }
+                m_PackManager.UpdateCommandProgress("import-raw", i + 1);
             }
+            m_PackManager.ClearCommandProgress("import-raw");
             MainConsole.Instance.Output(string.Format("Total raw assets imported: {0} (skipped/non-UUID: {1})", count, skipped));
         }
 
@@ -827,12 +930,38 @@ namespace OpenSim.Services.AdvancedAssetService
             int notFoundCount = 0;
             int errorCount = 0;
 
+            int startIndex = m_PackManager.PromptResumeProgress("scan-inventory", path, missingIDs.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("scan-inventory", path, missingIDs.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:scan-inventory:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 3)
+                    {
+                        int.TryParse(parts[0], out importedCount);
+                        int.TryParse(parts[1], out notFoundCount);
+                        int.TryParse(parts[2], out errorCount);
+                    }
+                }
+            }
+
             #pragma warning disable SYSLIB0011
             System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
             #pragma warning restore SYSLIB0011
 
-            foreach (UUID assetID in missingIDs)
+            for (int i = startIndex; i < missingIDs.Count; i++)
             {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Inventory scan aborted by user.");
+                    return;
+                }
+                UUID assetID = missingIDs[i];
                 try
                 {
                     string normUuid = assetID.ToString().ToLower().Replace("-", "");
@@ -892,6 +1021,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     if (string.IsNullOrEmpty(matchedFilePath))
                     {
                         notFoundCount++;
+                        m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
+                        m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
                         continue;
                     }
 
@@ -938,6 +1069,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     if (extData == null || extData.Length == 0)
                     {
                         errorCount++;
+                        m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
+                        m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
                         continue;
                     }
 
@@ -949,8 +1082,11 @@ namespace OpenSim.Services.AdvancedAssetService
                     m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Error restoring inventory asset {0}: {1}", assetID, ex.Message));
                     errorCount++;
                 }
+                m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
+                m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
             }
 
+            m_PackManager.ClearCommandProgress("scan-inventory");
             MainConsole.Instance.Output(string.Format("Errors during Import:    {0}", errorCount));
         }
 
@@ -989,15 +1125,49 @@ namespace OpenSim.Services.AdvancedAssetService
             int missingInGrid = 0;
             int hashMismatch = 0;
             int syncedInGrid = 0;
+            int errorCount = 0;
             bool repair = (args.Length > 2 && args[2] == "--repair");
+            string key = repair ? "repair" : "audit";
+
+            int startIndex = m_PackManager.PromptResumeProgress("audit-grid", key, total, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("audit-grid", key, total);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:audit-grid:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 4)
+                    {
+                        int.TryParse(parts[0], out missingInGrid);
+                        int.TryParse(parts[1], out hashMismatch);
+                        int.TryParse(parts[2], out syncedInGrid);
+                        int.TryParse(parts[3], out errorCount);
+                    }
+                }
+            }
 
             MainConsole.Instance.Output(string.Format("Auditing {0} local assets against grid database...", total));
-            int processed = 0;
 
-            foreach (var meta in allAssets)
+            for (int i = startIndex; i < total; i++)
             {
-                processed++;
-                if (processed % 1000 == 0) MainConsole.Instance.Output(string.Format("Audited {0} / {1}...", processed, total));
+                if (m_PackManager.CheckUserAbort())
+                {
+                    m_PackManager.UpdateCommandProgress("audit-grid", i);
+                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3}", missingInGrid, hashMismatch, syncedInGrid, errorCount));
+                    MainConsole.Instance.Output("Grid audit aborted by user.");
+                    return;
+                }
+                var meta = allAssets[i];
+                if ((i + 1) % 1000 == 0 || i + 1 == total)
+                {
+                    MainConsole.Instance.Output(string.Format("Audited {0} / {1}...", i + 1, total));
+                    m_PackManager.UpdateCommandProgress("audit-grid", i + 1);
+                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3}", missingInGrid, hashMismatch, syncedInGrid, errorCount));
+                }
 
                 try
                 {
@@ -1056,14 +1226,21 @@ namespace OpenSim.Services.AdvancedAssetService
                 catch (Exception ex)
                 {
                     MainConsole.Instance.Output(string.Format("[ERROR] Failed to audit asset {0}: {1}", meta.UUID, ex.Message));
+                    errorCount++;
                 }
             }
+
+            m_PackManager.ClearCommandProgress("audit-grid");
 
             MainConsole.Instance.Output("--- Audit Summary ---");
             MainConsole.Instance.Output(string.Format("Total local assets:   {0}", total));
             MainConsole.Instance.Output(string.Format("Synced in Grid:       {0}", syncedInGrid));
             MainConsole.Instance.Output(string.Format("Missing in Grid:      {0}", missingInGrid));
             MainConsole.Instance.Output(string.Format("Hash Mismatch:        {0}", hashMismatch));
+            if (errorCount > 0)
+            {
+                MainConsole.Instance.Output(string.Format("Audit Errors:         {0}", errorCount));
+            }
             if (!repair && (missingInGrid > 0 || hashMismatch > 0))
             {
                 MainConsole.Instance.Output("Run 'aas audit-grid --repair' to automatically push missing/corrected metadata to grid database.");
@@ -1084,8 +1261,33 @@ namespace OpenSim.Services.AdvancedAssetService
             int recovered = 0;
             int defaultFallback = 0;
 
-            foreach (var kvp in broken)
+            int startIndex = m_PackManager.PromptResumeProgress("repair-links", "run", broken.Count, out bool resume);
+            if (!resume)
             {
+                m_PackManager.StartCommandProgress("repair-links", "run", broken.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:repair-links:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 2)
+                    {
+                        int.TryParse(parts[0], out recovered);
+                        int.TryParse(parts[1], out defaultFallback);
+                    }
+                }
+            }
+
+            for (int i = startIndex; i < broken.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Repair links aborted by user.");
+                    return;
+                }
+                var kvp = broken[i];
                 string uuid = kvp.Key;
                 byte[] data = null;
                 sbyte type = (sbyte)AssetType.Unknown;
@@ -1119,7 +1321,12 @@ namespace OpenSim.Services.AdvancedAssetService
                     recovered++;
                     MainConsole.Instance.Output(string.Format(" -> Restored UUID {0} (Type: {1}, Name: '{2}') with fallback data.", uuid, type, name));
                 }
+
+                m_PackManager.UpdateCommandProgress("repair-links", i + 1);
+                m_PackManager.SetConfig("cmd_state:repair-links:metadata", string.Format("{0},{1}", recovered, defaultFallback));
             }
+
+            m_PackManager.ClearCommandProgress("repair-links");
 
             MainConsole.Instance.Output("--- Recovery Summary ---");
             MainConsole.Instance.Output(string.Format("Broken links processed: {0}", broken.Count));
@@ -1175,6 +1382,11 @@ namespace OpenSim.Services.AdvancedAssetService
                 
                 while (true)
                 {
+                    if (m_PackManager.CheckUserAbort())
+                    {
+                        MainConsole.Instance.Output("Database synchronization aborted by user.");
+                        break;
+                    }
                     var unsynced = m_PackManager.GetUnsyncedAssets(batchSize);
                     if (unsynced.Count == 0)
                         break;
@@ -1246,16 +1458,46 @@ namespace OpenSim.Services.AdvancedAssetService
 
             int count = 0;
             HashSet<string> exportedHashes = new HashSet<string>();
-            
-            string sqlPath = Path.Combine(basePath, "metadata.sql");
-            using (StreamWriter sw = new StreamWriter(sqlPath))
-            {
-                sw.WriteLine("-- AdvancedAssetService Metadata Export");
-                sw.WriteLine("-- Use this to reconstruct the 'fsassets' or 'assets' table in MySQL/PostgreSQL");
-                sw.WriteLine("");
 
-                foreach (var meta in assets)
+            int startIndex = m_PackManager.PromptResumeProgress("export-legacy", basePath, assets.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("export-legacy", basePath, assets.Count);
+            }
+            else
+            {
+                string dataDir = Path.Combine(basePath, "data");
+                if (Directory.Exists(dataDir))
                 {
+                    try
+                    {
+                        foreach (string file in SafeGetFiles(dataDir))
+                        {
+                            exportedHashes.Add(Path.GetFileNameWithoutExtension(file));
+                        }
+                    }
+                    catch {}
+                }
+            }
+
+            string sqlPath = Path.Combine(basePath, "metadata.sql");
+            using (StreamWriter sw = new StreamWriter(sqlPath, resume))
+            {
+                if (!resume)
+                {
+                    sw.WriteLine("-- AdvancedAssetService Metadata Export");
+                    sw.WriteLine("-- Use this to reconstruct the 'fsassets' or 'assets' table in MySQL/PostgreSQL");
+                    sw.WriteLine("");
+                }
+
+                for (int i = startIndex; i < assets.Count; i++)
+                {
+                    if (m_PackManager.CheckUserAbort())
+                    {
+                        MainConsole.Instance.Output("Legacy export aborted by user.");
+                        return;
+                    }
+                    var meta = assets[i];
                     try
                     {
                         // 1. Physical Export (Deduplicated)
@@ -1288,8 +1530,11 @@ namespace OpenSim.Services.AdvancedAssetService
                     {
                         m_log.Error($"[ADVANCED ASSET SERVICE]: Error exporting {meta.UUID}: {ex.Message}");
                     }
+                    m_PackManager.UpdateCommandProgress("export-legacy", i + 1);
                 }
             }
+
+            m_PackManager.ClearCommandProgress("export-legacy");
             
             MainConsole.Instance.Output($"Total processed: {count}");
             MainConsole.Instance.Output($"Deduplicated files: {exportedHashes.Count}");

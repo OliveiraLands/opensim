@@ -534,10 +534,27 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 FlushBatch();
                 m_log.Info("[ADVANCED ASSET SERVICE]: Rebuilding index...");
-                ExecuteNonQuery("DELETE FROM index_assets; DELETE FROM asset_map;");
                 string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
                 Array.Sort(files);
-                foreach (string file in files) ScanPackFile(file, int.Parse(Path.GetFileNameWithoutExtension(file).Substring(5)));
+
+                int startIndex = PromptResumeProgress("rebuild-index", "run", files.Length, out bool resume);
+                if (!resume)
+                {
+                    ExecuteNonQuery("DELETE FROM index_assets; DELETE FROM asset_map;");
+                    StartCommandProgress("rebuild-index", "run", files.Length);
+                }
+
+                for (int i = startIndex; i < files.Length; i++)
+                {
+                    if (CheckUserAbort())
+                    {
+                        m_log.Warn("[ADVANCED ASSET SERVICE]: Rebuild index aborted by user.");
+                        return;
+                    }
+                    ScanPackFile(files[i], int.Parse(Path.GetFileNameWithoutExtension(files[i]).Substring(5)));
+                    UpdateCommandProgress("rebuild-index", i + 1);
+                }
+                ClearCommandProgress("rebuild-index");
                 m_log.Info("[ADVANCED ASSET SERVICE]: Rebuild finished.");
             }
         }
@@ -782,15 +799,44 @@ namespace OpenSim.Services.AdvancedAssetService
                 totalAssets = entries.Count;
                 output($"Total unique data blocks (Hashes) to verify: {totalAssets}");
 
+                int startIndex = PromptResumeProgress("verify", "run", totalAssets, out bool resume);
+                if (!resume)
+                {
+                    StartCommandProgress("verify", "run", totalAssets);
+                }
+                else
+                {
+                    string metadata = GetConfig("cmd_state:verify:metadata");
+                    if (!string.IsNullOrEmpty(metadata))
+                    {
+                        string[] parts = metadata.Split(',');
+                        if (parts.Length == 3)
+                        {
+                            int.TryParse(parts[0], out missingPacks);
+                            int.TryParse(parts[1], out corruptedAssets);
+                            int.TryParse(parts[2], out validAssets);
+                        }
+                    }
+                }
+
                 Dictionary<int, FileStream> openPacks = new Dictionary<int, FileStream>();
 
                 try
                 {
-                    int processed = 0;
-                    foreach (var entry in entries)
+                    for (int i = startIndex; i < entries.Count; i++)
                     {
-                        processed++;
-                        if (processed % 1000 == 0) output($"Verified {processed} / {totalAssets}...");
+                        if (CheckUserAbort())
+                        {
+                            output("Integrity verification aborted by user.");
+                            return;
+                        }
+                        var entry = entries[i];
+                        if ((i + 1) % 1000 == 0 || i + 1 == entries.Count)
+                        {
+                            output($"Verified {i + 1} / {totalAssets}...");
+                            UpdateCommandProgress("verify", i + 1);
+                            SetConfig("cmd_state:verify:metadata", string.Format("{0},{1},{2}", missingPacks, corruptedAssets, validAssets));
+                        }
 
                         if (!openPacks.TryGetValue(entry.PackFileID, out FileStream fs))
                         {
@@ -853,6 +899,7 @@ namespace OpenSim.Services.AdvancedAssetService
                             output($"[ERROR] Read error for Hash {entry.Hash}: {ex.Message}");
                         }
                     }
+                    ClearCommandProgress("verify");
                 }
                 finally
                 {
@@ -917,16 +964,73 @@ namespace OpenSim.Services.AdvancedAssetService
 
                 output(string.Format("Found {0} active assets to defragment.", activeEntries.Count));
 
+                // Defrag progress/resume setup
+                ExecuteNonQuery("CREATE TABLE IF NOT EXISTS defrag_new_entries (hash TEXT, pack_id INTEGER, offset INTEGER, length INTEGER)");
+                ExecuteNonQuery("CREATE TABLE IF NOT EXISTS defrag_new_maps (uuid TEXT, hash TEXT, type INTEGER, name TEXT, created INTEGER)");
+
+                int startIndex = PromptResumeProgress("defrag", "run", activeEntries.Count, out bool resume);
+
                 string tempDir = Path.Combine(m_BasePath, "defrag_tmp");
-                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
-                Directory.CreateDirectory(tempDir);
-
-                int currentDestPackId = 0;
-                string currentDestPackPath = Path.Combine(tempDir, "pack_0.bin");
-                long currentDestOffset = 0;
-
                 List<PackFileIndexEntry> newEntries = new List<PackFileIndexEntry>();
                 List<AssetMetadataRecord> newMapEntries = new List<AssetMetadataRecord>();
+                int currentDestPackId = 0;
+
+                if (!resume)
+                {
+                    ExecuteNonQuery("DELETE FROM defrag_new_entries; DELETE FROM defrag_new_maps;");
+                    try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch {}
+                    Directory.CreateDirectory(tempDir);
+                    StartCommandProgress("defrag", "run", activeEntries.Count);
+                }
+                else
+                {
+                    // Load existing state
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT hash, pack_id, offset, length FROM defrag_new_entries";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                newEntries.Add(new PackFileIndexEntry
+                                {
+                                    Hash = reader.GetString(0),
+                                    PackFileID = reader.GetInt32(1),
+                                    Offset = reader.GetInt64(2),
+                                    Length = reader.GetInt32(3)
+                                });
+                            }
+                        }
+
+                        cmd.CommandText = "SELECT uuid, hash, type, name, created FROM defrag_new_maps";
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                newMapEntries.Add(new AssetMetadataRecord
+                                {
+                                    UUID = reader.GetString(0),
+                                    Hash = reader.GetString(1),
+                                    Type = (sbyte)reader.GetInt32(2),
+                                    Name = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                                    Created = reader.GetInt64(4)
+                                });
+                            }
+                        }
+                    }
+
+                    // Find max pack ID in loaded entries
+                    foreach (var ne in newEntries)
+                    {
+                        if (ne.PackFileID > currentDestPackId)
+                            currentDestPackId = ne.PackFileID;
+                    }
+                    currentDestPackId++; // Start next pack file to avoid corrupting/appending to existing bin file
+                    if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+                }
+
+                string currentDestPackPath = Path.Combine(tempDir, string.Format("pack_{0}.bin", currentDestPackId));
+                long currentDestOffset = 0;
                 Dictionary<int, FileStream> openSourcePacks = new Dictionary<int, FileStream>();
 
                 FileStream destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -934,122 +1038,169 @@ namespace OpenSim.Services.AdvancedAssetService
 
                 try
                 {
-                    int processed = 0;
-                    foreach (var entry in activeEntries)
+                    SQLiteTransaction trans = m_Connection.BeginTransaction();
+                    try
                     {
-                        processed++;
-                        if (processed % 500 == 0) output(string.Format("Processed {0} / {1}...", processed, activeEntries.Count));
-
-                        // Read from source pack
-                        if (!openSourcePacks.TryGetValue(entry.PackFileID, out FileStream sourceFs))
+                        for (int i = startIndex; i < activeEntries.Count; i++)
                         {
-                            string sourcePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
-                            if (!File.Exists(sourcePackPath))
+                            if (CheckUserAbort())
                             {
-                                output(string.Format("[ERROR] Source pack file missing: {0}. Skipping this asset.", sourcePackPath));
-                                continue;
+                                output("Defragmentation aborted by user.");
+                                return;
                             }
-                            sourceFs = new FileStream(sourcePackPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                            openSourcePacks[entry.PackFileID] = sourceFs;
-                        }
+                            var entry = activeEntries[i];
 
-                        try
-                        {
-                            sourceFs.Seek(entry.Offset, SeekOrigin.Begin);
-                            using (BinaryReader sourceBr = new BinaryReader(sourceFs, Encoding.UTF8, true))
+                            // Read from source pack
+                            if (!openSourcePacks.TryGetValue(entry.PackFileID, out FileStream sourceFs))
                             {
-                                if (sourceBr.ReadUInt32() != MAGIC_NUMBER)
+                                string sourcePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
+                                if (!File.Exists(sourcePackPath))
                                 {
-                                    output(string.Format("[ERROR] Magic number mismatch for hash {0}. Skipping.", entry.Hash));
+                                    output(string.Format("[ERROR] Source pack file missing: {0}. Skipping this asset.", sourcePackPath));
                                     continue;
                                 }
-                                ushort version = sourceBr.ReadUInt16();
-                                byte[] uuidBytes = sourceBr.ReadBytes(16);
-                                sbyte type = sourceBr.ReadSByte();
-                                long created = (version >= 2) ? sourceBr.ReadInt64() : 0;
-                                ushort nameLen = sourceBr.ReadUInt16();
-                                byte[] nameBytes = sourceBr.ReadBytes(nameLen);
-                                int dataLen = sourceBr.ReadInt32();
-                                byte[] dataBytes = sourceBr.ReadBytes(dataLen);
+                                sourceFs = new FileStream(sourcePackPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                                openSourcePacks[entry.PackFileID] = sourceFs;
+                            }
 
-                                string name = Encoding.UTF8.GetString(nameBytes);
-
-                                // Check if UUID is invalid (e.g. SHA-256 hash of 64 chars) and try to repair it via MySQL
-                                string correctedUuid = entry.UUID;
-                                if (entry.UUID.Length > 36)
+                            try
+                            {
+                                sourceFs.Seek(entry.Offset, SeekOrigin.Begin);
+                                using (BinaryReader sourceBr = new BinaryReader(sourceFs, Encoding.UTF8, true))
                                 {
-                                    string resolvedUuid = null;
-                                    if (gridConnector != null)
+                                    if (sourceBr.ReadUInt32() != MAGIC_NUMBER)
                                     {
-                                        try
-                                        {
-                                            resolvedUuid = gridConnector.GetUUIDByHash(entry.Hash);
-                                        }
-                                        catch {}
-                                    }
-
-                                    if (!string.IsNullOrEmpty(resolvedUuid) && UUID.TryParse(resolvedUuid, out UUID dummyId))
-                                    {
-                                        correctedUuid = dummyId.ToString().ToLower().Replace("-", "");
-                                        output(string.Format("Defrag Resolved invalid UUID '{0}' to correct UUID '{1}' via grid database.", entry.UUID, dummyId));
-                                    }
-                                    else
-                                    {
-                                        output(string.Format("Defrag Skipping invalid UUID '{0}' (no mapping found in grid database).", entry.UUID));
+                                        output(string.Format("[ERROR] Magic number mismatch for hash {0}. Skipping.", entry.Hash));
                                         continue;
                                     }
+                                    ushort version = sourceBr.ReadUInt16();
+                                    byte[] uuidBytes = sourceBr.ReadBytes(16);
+                                    sbyte type = sourceBr.ReadSByte();
+                                    long created = (version >= 2) ? sourceBr.ReadInt64() : 0;
+                                    ushort nameLen = sourceBr.ReadUInt16();
+                                    byte[] nameBytes = sourceBr.ReadBytes(nameLen);
+                                    int dataLen = sourceBr.ReadInt32();
+                                    byte[] dataBytes = sourceBr.ReadBytes(dataLen);
+
+                                    string name = Encoding.UTF8.GetString(nameBytes);
+
+                                    // Check if UUID is invalid (e.g. SHA-256 hash of 64 chars) and try to repair it via MySQL
+                                    string correctedUuid = entry.UUID;
+                                    if (entry.UUID.Length > 36)
+                                    {
+                                        string resolvedUuid = null;
+                                        if (gridConnector != null)
+                                        {
+                                            try
+                                            {
+                                                resolvedUuid = gridConnector.GetUUIDByHash(entry.Hash);
+                                            }
+                                            catch {}
+                                        }
+
+                                        if (!string.IsNullOrEmpty(resolvedUuid) && UUID.TryParse(resolvedUuid, out UUID dummyId))
+                                        {
+                                            correctedUuid = dummyId.ToString().ToLower().Replace("-", "");
+                                            output(string.Format("Defrag Resolved invalid UUID '{0}' to correct UUID '{1}' via grid database.", entry.UUID, dummyId));
+                                        }
+                                        else
+                                        {
+                                            output(string.Format("Defrag Skipping invalid UUID '{0}' (no mapping found in grid database).", entry.UUID));
+                                            continue;
+                                        }
+                                    }
+
+                                    byte[] finalUuidBytes = uuidBytes;
+                                    if (correctedUuid != entry.UUID)
+                                    {
+                                        finalUuidBytes = new UUID(correctedUuid).GetBytes();
+                                    }
+
+                                    // Write to dest pack
+                                    if (destFs.Position > m_MaxPackSize)
+                                    {
+                                        destBw.Dispose();
+                                        destFs.Dispose();
+                                        currentDestPackId++;
+                                        currentDestPackPath = Path.Combine(tempDir, string.Format("pack_{0}.bin", currentDestPackId));
+                                        destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                                        destBw = new BinaryWriter(destFs);
+                                    }
+
+                                    currentDestOffset = destFs.Position;
+                                    destBw.Write(MAGIC_NUMBER);
+                                    destBw.Write(version);
+                                    destBw.Write(finalUuidBytes);
+                                    destBw.Write(type);
+                                    if (version >= 2) destBw.Write(created);
+                                    destBw.Write(nameLen);
+                                    destBw.Write(nameBytes);
+                                    destBw.Write(dataLen);
+                                    destBw.Write(dataBytes);
+
+                                    var ne = new PackFileIndexEntry
+                                    {
+                                        Hash = entry.Hash,
+                                        PackFileID = currentDestPackId,
+                                        Offset = currentDestOffset,
+                                        Length = dataLen
+                                    };
+                                    var nm = new AssetMetadataRecord
+                                    {
+                                        UUID = correctedUuid,
+                                        Hash = entry.Hash,
+                                        Type = type,
+                                        Name = name,
+                                        Created = created
+                                    };
+
+                                    newEntries.Add(ne);
+                                    newMapEntries.Add(nm);
+
+                                    // Persist in temp tables
+                                    using (var cmd = m_Connection.CreateCommand())
+                                    {
+                                        cmd.CommandText = "INSERT INTO defrag_new_entries (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                        cmd.Parameters.AddWithValue(null, ne.Hash);
+                                        cmd.Parameters.AddWithValue(null, ne.PackFileID);
+                                        cmd.Parameters.AddWithValue(null, ne.Offset);
+                                        cmd.Parameters.AddWithValue(null, ne.Length);
+                                        cmd.ExecuteNonQuery();
+
+                                        cmd.CommandText = "INSERT INTO defrag_new_maps (uuid, hash, type, name, created) VALUES (?, ?, ?, ?, ?)";
+                                        cmd.Parameters.Clear();
+                                        cmd.Parameters.AddWithValue(null, nm.UUID);
+                                        cmd.Parameters.AddWithValue(null, nm.Hash);
+                                        cmd.Parameters.AddWithValue(null, (int)nm.Type);
+                                        cmd.Parameters.AddWithValue(null, nm.Name);
+                                        cmd.Parameters.AddWithValue(null, nm.Created);
+                                        cmd.ExecuteNonQuery();
+                                    }
+
+                                    if ((i + 1) % 500 == 0 || (i + 1) == activeEntries.Count)
+                                    {
+                                        trans.Commit();
+                                        trans.Dispose();
+                                        UpdateCommandProgress("defrag", i + 1);
+                                        output(string.Format("Processed {0} / {1}...", i + 1, activeEntries.Count));
+                                        if ((i + 1) < activeEntries.Count)
+                                        {
+                                            trans = m_Connection.BeginTransaction();
+                                        }
+                                    }
                                 }
-
-                                byte[] finalUuidBytes = uuidBytes;
-                                if (correctedUuid != entry.UUID)
-                                {
-                                    finalUuidBytes = new UUID(correctedUuid).GetBytes();
-                                }
-
-                                // Write to dest pack
-                                if (destFs.Position > m_MaxPackSize)
-                                {
-                                    destBw.Dispose();
-                                    destFs.Dispose();
-                                    currentDestPackId++;
-                                    currentDestPackPath = Path.Combine(tempDir, string.Format("pack_{0}.bin", currentDestPackId));
-                                    destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                                    destBw = new BinaryWriter(destFs);
-                                }
-
-                                currentDestOffset = destFs.Position;
-                                destBw.Write(MAGIC_NUMBER);
-                                destBw.Write(version);
-                                destBw.Write(finalUuidBytes);
-                                destBw.Write(type);
-                                if (version >= 2) destBw.Write(created);
-                                destBw.Write(nameLen);
-                                destBw.Write(nameBytes);
-                                destBw.Write(dataLen);
-                                destBw.Write(dataBytes);
-
-                                newEntries.Add(new PackFileIndexEntry
-                                {
-                                    Hash = entry.Hash,
-                                    PackFileID = currentDestPackId,
-                                    Offset = currentDestOffset,
-                                    Length = dataLen
-                                });
-
-                                newMapEntries.Add(new AssetMetadataRecord
-                                {
-                                    UUID = correctedUuid,
-                                    Hash = entry.Hash,
-                                    Type = type,
-                                    Name = name,
-                                    Created = created
-                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                output(string.Format("[ERROR] Failed to read/write record for hash {0}: {1}", entry.Hash, ex.Message));
                             }
                         }
-                        catch (Exception ex)
-                        {
-                            output(string.Format("[ERROR] Failed to read/write record for hash {0}: {1}", entry.Hash, ex.Message));
-                        }
+                    }
+                    catch
+                    {
+                        try { trans.Rollback(); } catch {}
+                        trans.Dispose();
+                        throw;
                     }
 
                     destBw.Dispose();
@@ -1077,7 +1228,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     Directory.Delete(tempDir, true);
 
                     // Update SQLite database in transaction
-                    using (var trans = m_Connection.BeginTransaction())
+                    using (var finalTrans = m_Connection.BeginTransaction())
                     {
                         try
                         {
@@ -1114,12 +1265,16 @@ namespace OpenSim.Services.AdvancedAssetService
                                 cmd.Parameters.Clear();
                                 cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
                                 cmd.ExecuteNonQuery();
+
+                                cmd.CommandText = "DROP TABLE IF EXISTS defrag_new_entries; DROP TABLE IF EXISTS defrag_new_maps;";
+                                cmd.ExecuteNonQuery();
                             }
-                            trans.Commit();
+                            ClearCommandProgress("defrag");
+                            finalTrans.Commit();
                         }
                         catch (Exception ex)
                         {
-                            trans.Rollback();
+                            finalTrans.Rollback();
                             output("[FATAL ERROR] Failed to commit SQLite transaction for defragmentation: " + ex.Message);
                             throw;
                         }
@@ -1207,15 +1362,30 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 FlushBatch();
                 output("Starting AdvancedAssetService Deep Resilient Index Rebuild...");
-                ExecuteNonQuery("DELETE FROM index_assets; DELETE FROM asset_map;");
                 string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
                 Array.Sort(files);
-                foreach (string file in files)
+
+                int startIndex = PromptResumeProgress("deep-repair", "run", files.Length, out bool resume);
+                if (!resume)
                 {
+                    ExecuteNonQuery("DELETE FROM index_assets; DELETE FROM asset_map;");
+                    StartCommandProgress("deep-repair", "run", files.Length);
+                }
+
+                for (int i = startIndex; i < files.Length; i++)
+                {
+                    if (CheckUserAbort())
+                    {
+                        output("Deep Resilient Index Rebuild aborted by user.");
+                        return;
+                    }
+                    string file = files[i];
                     int packId = int.Parse(Path.GetFileNameWithoutExtension(file).Substring(5));
                     output(string.Format("Salvaging packfile: {0}...", Path.GetFileName(file)));
                     ScanPackFileResilient(file, packId, output);
+                    UpdateCommandProgress("deep-repair", i + 1);
                 }
+                ClearCommandProgress("deep-repair");
                 output("Deep Resilient Index Rebuild finished.");
             }
         }
@@ -1238,6 +1408,121 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
             return results;
+        }
+
+        public void SetConfig(string key, string value)
+        {
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)";
+                    cmd.Parameters.AddWithValue(null, key);
+                    cmd.Parameters.AddWithValue(null, value);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public string GetConfig(string key)
+        {
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT value FROM config WHERE key = ?";
+                    cmd.Parameters.AddWithValue(null, key);
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            return reader.GetString(0);
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        public void DeleteConfig(string key)
+        {
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "DELETE FROM config WHERE key = ?";
+                    cmd.Parameters.AddWithValue(null, key);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+
+        public int PromptResumeProgress(string commandName, string key, int totalItems, out bool resume)
+        {
+            resume = false;
+            string status = GetConfig("cmd_state:" + commandName + ":status");
+            if (status == "running")
+            {
+                string savedKey = GetConfig("cmd_state:" + commandName + ":key");
+                if (savedKey == key)
+                {
+                    string processedStr = GetConfig("cmd_state:" + commandName + ":processed");
+                    if (int.TryParse(processedStr, out int processed) && processed > 0 && processed < totalItems)
+                    {
+                        string promptMsg = "An interrupted '" + commandName + "' operation was found at " + processed + "/" + totalItems + ". Do you want to resume from where you left off?";
+                        if (OpenSim.Framework.MainConsole.Instance.Prompt(promptMsg, "yes") == "yes")
+                        {
+                            resume = true;
+                            return processed;
+                        }
+                    }
+                }
+            }
+            ClearCommandProgress(commandName);
+            return 0;
+        }
+
+        public void StartCommandProgress(string commandName, string key, int totalItems)
+        {
+            SetConfig("cmd_state:" + commandName + ":status", "running");
+            SetConfig("cmd_state:" + commandName + ":key", key);
+            SetConfig("cmd_state:" + commandName + ":total", totalItems.ToString());
+            SetConfig("cmd_state:" + commandName + ":processed", "0");
+        }
+
+        public void UpdateCommandProgress(string commandName, int processed)
+        {
+            SetConfig("cmd_state:" + commandName + ":processed", processed.ToString());
+        }
+
+        public void ClearCommandProgress(string commandName)
+        {
+            DeleteConfig("cmd_state:" + commandName + ":status");
+            DeleteConfig("cmd_state:" + commandName + ":key");
+            DeleteConfig("cmd_state:" + commandName + ":total");
+            DeleteConfig("cmd_state:" + commandName + ":processed");
+            DeleteConfig("cmd_state:" + commandName + ":metadata");
+        }
+
+        public bool CheckUserAbort()
+        {
+            try
+            {
+                if (Console.KeyAvailable)
+                {
+                    ConsoleKeyInfo key = Console.ReadKey(true);
+                    if (key.Key == ConsoleKey.Escape)
+                    {
+                        OpenSim.Framework.MainConsole.Instance.Output("Operation aborted by user (Escape key pressed).");
+                        return true;
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Console input is redirected/headless, ignore key checks
+            }
+            return false;
         }
     }
 }
