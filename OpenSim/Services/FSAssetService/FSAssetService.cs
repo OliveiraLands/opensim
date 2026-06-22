@@ -394,12 +394,132 @@ namespace OpenSim.Services.FSAssetService
             }
         }
 
+        private string ResolveCaseInsensitivePath(string hash, string extension)
+        {
+            if (string.IsNullOrEmpty(hash) || hash.Length < 10)
+                return null;
+
+            // 1. Try fast path: lowercase hash
+            string lowerHash = hash.ToLower();
+            string lowerPath = Path.Combine(m_FSBase, HashToFile(lowerHash)) + extension;
+            if (File.Exists(lowerPath))
+                return lowerPath;
+
+            // 2. Try fast path: uppercase hash
+            string upperHash = hash.ToUpper();
+            string upperPath = Path.Combine(m_FSBase, HashToFile(upperHash)) + extension;
+            if (File.Exists(upperPath))
+                return upperPath;
+
+            // 3. Try fast path: uppercase directory, lowercase filename
+            string mixedPath1 = Path.Combine(m_FSBase, Path.Combine(HashToPath(upperHash), lowerHash)) + extension;
+            if (File.Exists(mixedPath1))
+                return mixedPath1;
+
+            // 4. Try fast path: lowercase directory, uppercase filename
+            string mixedPath2 = Path.Combine(m_FSBase, Path.Combine(HashToPath(lowerHash), upperHash)) + extension;
+            if (File.Exists(mixedPath2))
+                return mixedPath2;
+
+            // 5. Segment-by-segment fallback (handles mixed-case levels of directory co-existence on case-sensitive Linux filesystems)
+            List<string> segments = new List<string>();
+            if (m_useOsgridFormat)
+            {
+                segments.Add(hash.Substring(0, 3));
+                segments.Add(hash.Substring(3, 3));
+            }
+            else
+            {
+                segments.Add(hash.Substring(0, 2));
+                segments.Add(hash.Substring(2, 2));
+                segments.Add(hash.Substring(4, 2));
+                segments.Add(hash.Substring(6, 4));
+            }
+            segments.Add(hash + extension);
+
+            string currentPath = m_FSBase;
+
+            for (int i = 0; i < segments.Count; i++)
+            {
+                string segment = segments[i];
+                bool isLast = (i == segments.Count - 1);
+
+                string lowerSegment = segment.ToLower();
+                string upperSegment = segment.ToUpper();
+
+                string pathLower = Path.Combine(currentPath, lowerSegment);
+                string pathUpper = Path.Combine(currentPath, upperSegment);
+
+                if (isLast)
+                {
+                    if (File.Exists(pathLower))
+                    {
+                        currentPath = pathLower;
+                    }
+                    else if (File.Exists(pathUpper))
+                    {
+                        currentPath = pathUpper;
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(currentPath))
+                            return null;
+
+                        string[] files = Directory.GetFiles(currentPath);
+                        string matchedFile = null;
+                        foreach (string file in files)
+                        {
+                            if (string.Equals(Path.GetFileName(file), segment, StringComparison.OrdinalIgnoreCase))
+                            {
+                                matchedFile = file;
+                                break;
+                            }
+                        }
+                        if (matchedFile != null)
+                            currentPath = matchedFile;
+                        else
+                            return null;
+                    }
+                }
+                else
+                {
+                    if (Directory.Exists(pathLower))
+                    {
+                        currentPath = pathLower;
+                    }
+                    else if (Directory.Exists(pathUpper))
+                    {
+                        currentPath = pathUpper;
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(currentPath))
+                            return null;
+
+                        string[] dirs = Directory.GetDirectories(currentPath);
+                        string matchedDir = null;
+                        foreach (string dir in dirs)
+                        {
+                            if (string.Equals(Path.GetFileName(dir), segment, StringComparison.OrdinalIgnoreCase))
+                            {
+                                matchedDir = dir;
+                                break;
+                            }
+                        }
+                        if (matchedDir != null)
+                            currentPath = matchedDir;
+                        else
+                            return null;
+                    }
+                }
+            }
+
+            return currentPath;
+        }
+
         private bool AssetExists(string hash)
         {
-            string s = HashToFile(hash);
-            string diskFile = Path.Combine(m_FSBase, s);
-
-            if (File.Exists(diskFile + ".gz") || File.Exists(diskFile))
+            if (ResolveCaseInsensitivePath(hash, ".gz") != null || ResolveCaseInsensitivePath(hash, "") != null)
                 return true;
 
             return false;
@@ -572,14 +692,12 @@ namespace OpenSim.Services.FSAssetService
                 }
             }
 
-            string file = HashToFile(hash);
-            string diskFile = Path.Combine(m_FSBase, file);
-
-            if (File.Exists(diskFile + ".gz"))
+            string diskFileGz = ResolveCaseInsensitivePath(hash, ".gz");
+            if (diskFileGz != null)
             {
                 try
                 {
-                    using (GZipStream gz = new GZipStream(new FileStream(diskFile + ".gz", FileMode.Open, FileAccess.Read), CompressionMode.Decompress))
+                    using (GZipStream gz = new GZipStream(new FileStream(diskFileGz, FileMode.Open, FileAccess.Read), CompressionMode.Decompress))
                     {
                         using (MemoryStream ms = new MemoryStream())
                         {
@@ -602,11 +720,13 @@ namespace OpenSim.Services.FSAssetService
                     return Array.Empty<byte>();
                 }
             }
-            else if (File.Exists(diskFile))
+            
+            string diskFileRaw = ResolveCaseInsensitivePath(hash, "");
+            if (diskFileRaw != null)
             {
                 try
                 {
-                    byte[] content = File.ReadAllBytes(diskFile);
+                    byte[] content = File.ReadAllBytes(diskFileRaw);
 
                     return content;
                 }

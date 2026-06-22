@@ -241,7 +241,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
 
-            string[] files = Directory.GetFiles(path, "*.gz", SearchOption.AllDirectories);
+            string[] files = SafeGetFiles(path).FindAll(f => f.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)).ToArray();
             MainConsole.Instance.Output($"Found {files.Length} assets to import.");
 
             int count = 0;
@@ -307,7 +307,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
 
-            string[] files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+            string[] files = SafeGetFiles(path).ToArray();
             MainConsole.Instance.Output(string.Format("Found {0} files. Scanning for Flotsam cache assets...", files.Length));
 
             int totalScanned = 0;
@@ -386,7 +386,7 @@ namespace OpenSim.Services.AdvancedAssetService
             string[] files;
             try
             {
-                files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+                files = SafeGetFiles(path).ToArray();
             }
             catch (Exception ex)
             {
@@ -579,7 +579,7 @@ namespace OpenSim.Services.AdvancedAssetService
             string[] files;
             try
             {
-                files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+                files = SafeGetFiles(path).ToArray();
             }
             catch (Exception ex)
             {
@@ -757,7 +757,7 @@ namespace OpenSim.Services.AdvancedAssetService
             string[] allFiles;
             try
             {
-                allFiles = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
+                allFiles = SafeGetFiles(path).ToArray();
             }
             catch (Exception ex)
             {
@@ -1209,6 +1209,37 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 m_IsSyncing = false;
             }
+        }
+
+        private List<string> SafeGetFiles(string path)
+        {
+            List<string> files = new List<string>();
+            Queue<string> queue = new Queue<string>();
+            queue.Enqueue(path);
+            while (queue.Count > 0)
+            {
+                string currentDir = queue.Dequeue();
+                try
+                {
+                    foreach (string file in Directory.GetFiles(currentDir))
+                    {
+                        files.Add(file);
+                    }
+                    foreach (string subDir in Directory.GetDirectories(currentDir))
+                    {
+                        queue.Enqueue(subDir);
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Ignore permission errors and continue
+                }
+                catch (Exception)
+                {
+                    // Ignore other errors (e.g. broken symlinks) and continue
+                }
+            }
+            return files;
         }
 
         public void Dispose()
