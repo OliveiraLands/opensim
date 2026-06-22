@@ -116,6 +116,10 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-raw", "aas import-raw <path>", "Bulk import raw uncompressed assets named by UUID", HandleImportRaw);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path>", "Scan inventory database and import missing assets from an external folder", HandleScanInventory);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas defrag", "aas defrag", "Defragment PackFiles and release dead storage space", HandleDefragment);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
         }
 
         public virtual AssetBase Get(string id)
@@ -947,11 +951,205 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
 
-            MainConsole.Instance.Output("--- Inventory Scan & Import Summary ---");
-            MainConsole.Instance.Output(string.Format("Assets Missing in AAS:   {0}", missingIDs.Count));
-            MainConsole.Instance.Output(string.Format("Successfully Restored:   {0}", importedCount));
-            MainConsole.Instance.Output(string.Format("Not Found in External:   {0}", notFoundCount));
             MainConsole.Instance.Output(string.Format("Errors during Import:    {0}", errorCount));
+        }
+
+        private void HandleDefragment(string module, string[] args)
+        {
+            if (MainConsole.Instance.Prompt("This will rewrite all PackFiles and rebuild the index. Are you sure?", "no") != "yes")
+            {
+                MainConsole.Instance.Output("Aborted.");
+                return;
+            }
+            m_PackManager.Defragment(msg => MainConsole.Instance.Output("AAS Defrag: " + msg));
+        }
+
+        private void HandleDeepRepair(string module, string[] args)
+        {
+            if (MainConsole.Instance.Prompt("This will delete the current index and salvage active records byte-by-byte from PackFiles. Are you sure?", "no") != "yes")
+            {
+                MainConsole.Instance.Output("Aborted.");
+                return;
+            }
+            m_PackManager.RebuildIndexResilient(msg => MainConsole.Instance.Output("AAS Repair: " + msg));
+        }
+
+        private void HandleAuditGrid(string module, string[] args)
+        {
+            if (m_GridConnector == null)
+            {
+                MainConsole.Instance.Output("Database synchronization (Shadow Sync) is not enabled.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Starting Grid vs AAS database audit...");
+            var allAssets = m_PackManager.GetAllAssets();
+            
+            int total = allAssets.Count;
+            int missingInGrid = 0;
+            int hashMismatch = 0;
+            int syncedInGrid = 0;
+            bool repair = (args.Length > 2 && args[2] == "--repair");
+
+            MainConsole.Instance.Output(string.Format("Auditing {0} local assets against grid database...", total));
+            int processed = 0;
+
+            foreach (var meta in allAssets)
+            {
+                processed++;
+                if (processed % 1000 == 0) MainConsole.Instance.Output(string.Format("Audited {0} / {1}...", processed, total));
+
+                try
+                {
+                    string gridHash;
+                    AssetMetadata gridMeta = m_GridConnector.Get(meta.UUID, out gridHash);
+
+                    if (gridMeta == null)
+                    {
+                        missingInGrid++;
+                        MainConsole.Instance.Output(string.Format("[MISSING IN GRID] UUID {0} is in AAS but missing in MySQL.", meta.UUID));
+                        
+                        if (repair)
+                        {
+                            AssetMetadata am = new AssetMetadata
+                            {
+                                FullID = new UUID(meta.UUID),
+                                ID = meta.UUID,
+                                Type = meta.Type,
+                                Name = meta.Name,
+                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+                            };
+                            if (m_GridConnector.Store(am, meta.Hash))
+                            {
+                                m_PackManager.MarkAsSynced(meta.UUID);
+                                MainConsole.Instance.Output(string.Format(" -> Repaired: Uploaded UUID {0} to MySQL.", meta.UUID));
+                            }
+                        }
+                    }
+                    else if (gridHash != meta.Hash)
+                    {
+                        hashMismatch++;
+                        MainConsole.Instance.Output(string.Format("[HASH MISMATCH] UUID {0} has local hash {1} but grid hash {2}.", meta.UUID, meta.Hash, gridHash));
+                        
+                        if (repair)
+                        {
+                            AssetMetadata am = new AssetMetadata
+                            {
+                                FullID = new UUID(meta.UUID),
+                                ID = meta.UUID,
+                                Type = meta.Type,
+                                Name = meta.Name,
+                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+                            };
+                            if (m_GridConnector.Store(am, meta.Hash))
+                            {
+                                m_PackManager.MarkAsSynced(meta.UUID);
+                                MainConsole.Instance.Output(string.Format(" -> Repaired: Updated UUID {0} hash in MySQL.", meta.UUID));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        syncedInGrid++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output(string.Format("[ERROR] Failed to audit asset {0}: {1}", meta.UUID, ex.Message));
+                }
+            }
+
+            MainConsole.Instance.Output("--- Audit Summary ---");
+            MainConsole.Instance.Output(string.Format("Total local assets:   {0}", total));
+            MainConsole.Instance.Output(string.Format("Synced in Grid:       {0}", syncedInGrid));
+            MainConsole.Instance.Output(string.Format("Missing in Grid:      {0}", missingInGrid));
+            MainConsole.Instance.Output(string.Format("Hash Mismatch:        {0}", hashMismatch));
+            if (!repair && (missingInGrid > 0 || hashMismatch > 0))
+            {
+                MainConsole.Instance.Output("Run 'aas audit-grid --repair' to automatically push missing/corrected metadata to grid database.");
+            }
+        }
+
+        private void HandleRepairLinks(string module, string[] args)
+        {
+            MainConsole.Instance.Output("Scanning for broken asset links...");
+            var broken = m_PackManager.GetBrokenLinks();
+            if (broken.Count == 0)
+            {
+                MainConsole.Instance.Output("No broken links found. AAS is healthy.");
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} broken asset links. Attempting recovery...", broken.Count));
+            int recovered = 0;
+            int defaultFallback = 0;
+
+            foreach (var kvp in broken)
+            {
+                string uuid = kvp.Key;
+                byte[] data = null;
+                sbyte type = (sbyte)AssetType.Unknown;
+                string name = "Recovered Fallback Asset";
+
+                if (m_GridConnector != null)
+                {
+                    try
+                    {
+                        string dummy;
+                        AssetMetadata dbMeta = m_GridConnector.Get(uuid, out dummy);
+                        if (dbMeta != null)
+                        {
+                            type = dbMeta.Type;
+                            name = dbMeta.Name;
+                        }
+                    }
+                    catch {}
+                }
+
+                if (data == null)
+                {
+                    defaultFallback++;
+                    data = GenerateFallbackData(type);
+                    name = string.IsNullOrEmpty(name) ? "Fallback Asset" : name;
+                }
+
+                if (data != null)
+                {
+                    m_PackManager.StoreAssetData(uuid, data, type, name);
+                    recovered++;
+                    MainConsole.Instance.Output(string.Format(" -> Restored UUID {0} (Type: {1}, Name: '{2}') with fallback data.", uuid, type, name));
+                }
+            }
+
+            MainConsole.Instance.Output("--- Recovery Summary ---");
+            MainConsole.Instance.Output(string.Format("Broken links processed: {0}", broken.Count));
+            MainConsole.Instance.Output(string.Format("Successfully repaired:  {0} (Default fallbacks used: {1})", recovered, defaultFallback));
+        }
+
+        private byte[] GenerateFallbackData(sbyte type)
+        {
+            switch ((AssetType)type)
+            {
+                case AssetType.Texture:
+                    // 1x1 transparent PNG
+                    return new byte[] {
+                        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+                        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+                        0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60, 0x60, 0x60, 0x60,
+                        0x00, 0x00, 0x00, 0x05, 0x00, 0x01, 0xA5, 0x67, 0xB9, 0xCF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+                        0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+                    };
+                case AssetType.Sound:
+                    // 0.1s silent sound data (Ogg Vorbis minimal header)
+                    return new byte[] {
+                        0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xbc, 0xd0, 0x1d, 0x1e, 0x01, 0x1e, 0x01, 0x76, 0x6f, 0x72,
+                        0x62, 0x69, 0x73, 0x00, 0x00, 0x00, 0x00, 0x02, 0x44, 0xac, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x01
+                    };
+                default:
+                    return new byte[] { 0 };
+            }
         }
 
         private void HandleSyncDatabase(string module, string[] args)

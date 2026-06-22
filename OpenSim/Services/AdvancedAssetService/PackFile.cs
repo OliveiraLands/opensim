@@ -870,5 +870,310 @@ namespace OpenSim.Services.AdvancedAssetService
             else
                 output("STATUS: ISSUES DETECTED.");
         }
+
+        public void Defragment(Action<string> output)
+        {
+            output("Starting AdvancedAssetService PackFile Defragmentation...");
+            lock (m_Lock)
+            {
+                FlushBatch();
+                
+                // 1. Get all active hashes (that are pointed to by asset_map)
+                List<PackFileIndexEntry> activeEntries = new List<PackFileIndexEntry>();
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT DISTINCT ia.hash, ia.pack_id, ia.offset, ia.length FROM index_assets ia INNER JOIN asset_map am ON am.hash = ia.hash";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            activeEntries.Add(new PackFileIndexEntry
+                            {
+                                Hash = reader.GetString(0),
+                                PackFileID = reader.GetInt32(1),
+                                Offset = reader.GetInt64(2),
+                                Length = reader.GetInt32(3)
+                            });
+                        }
+                    }
+                }
+
+                if (activeEntries.Count == 0)
+                {
+                    output("No active assets found. Defragmentation skipped.");
+                    return;
+                }
+
+                output(string.Format("Found {0} active assets to defragment.", activeEntries.Count));
+
+                string tempDir = Path.Combine(m_BasePath, "defrag_tmp");
+                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+                Directory.CreateDirectory(tempDir);
+
+                int currentDestPackId = 0;
+                string currentDestPackPath = Path.Combine(tempDir, "pack_0.bin");
+                long currentDestOffset = 0;
+
+                List<PackFileIndexEntry> newEntries = new List<PackFileIndexEntry>();
+                Dictionary<int, FileStream> openSourcePacks = new Dictionary<int, FileStream>();
+
+                FileStream destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                BinaryWriter destBw = new BinaryWriter(destFs);
+
+                try
+                {
+                    int processed = 0;
+                    foreach (var entry in activeEntries)
+                    {
+                        processed++;
+                        if (processed % 500 == 0) output(string.Format("Processed {0} / {1}...", processed, activeEntries.Count));
+
+                        // Read from source pack
+                        if (!openSourcePacks.TryGetValue(entry.PackFileID, out FileStream sourceFs))
+                        {
+                            string sourcePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
+                            if (!File.Exists(sourcePackPath))
+                            {
+                                output(string.Format("[ERROR] Source pack file missing: {0}. Skipping this asset.", sourcePackPath));
+                                continue;
+                            }
+                            sourceFs = new FileStream(sourcePackPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                            openSourcePacks[entry.PackFileID] = sourceFs;
+                        }
+
+                        try
+                        {
+                            sourceFs.Seek(entry.Offset, SeekOrigin.Begin);
+                            using (BinaryReader sourceBr = new BinaryReader(sourceFs, Encoding.UTF8, true))
+                            {
+                                if (sourceBr.ReadUInt32() != MAGIC_NUMBER)
+                                {
+                                    output(string.Format("[ERROR] Magic number mismatch for hash {0}. Skipping.", entry.Hash));
+                                    continue;
+                                }
+                                ushort version = sourceBr.ReadUInt16();
+                                byte[] uuidBytes = sourceBr.ReadBytes(16);
+                                sbyte type = sourceBr.ReadSByte();
+                                long created = (version >= 2) ? sourceBr.ReadInt64() : 0;
+                                ushort nameLen = sourceBr.ReadUInt16();
+                                byte[] nameBytes = sourceBr.ReadBytes(nameLen);
+                                int dataLen = sourceBr.ReadInt32();
+                                byte[] dataBytes = sourceBr.ReadBytes(dataLen);
+
+                                // Write to dest pack
+                                if (destFs.Position > m_MaxPackSize)
+                                {
+                                    destBw.Dispose();
+                                    destFs.Dispose();
+                                    currentDestPackId++;
+                                    currentDestPackPath = Path.Combine(tempDir, string.Format("pack_{0}.bin", currentDestPackId));
+                                    destFs = new FileStream(currentDestPackPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                                    destBw = new BinaryWriter(destFs);
+                                }
+
+                                currentDestOffset = destFs.Position;
+                                destBw.Write(MAGIC_NUMBER);
+                                destBw.Write(version);
+                                destBw.Write(uuidBytes);
+                                destBw.Write(type);
+                                if (version >= 2) destBw.Write(created);
+                                destBw.Write(nameLen);
+                                destBw.Write(nameBytes);
+                                destBw.Write(dataLen);
+                                destBw.Write(dataBytes);
+
+                                newEntries.Add(new PackFileIndexEntry
+                                {
+                                    Hash = entry.Hash,
+                                    PackFileID = currentDestPackId,
+                                    Offset = currentDestOffset,
+                                    Length = dataLen
+                                });
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            output(string.Format("[ERROR] Failed to read/write record for hash {0}: {1}", entry.Hash, ex.Message));
+                        }
+                    }
+
+                    destBw.Dispose();
+                    destFs.Dispose();
+
+                    // Close all source files
+                    foreach (var fs in openSourcePacks.Values) fs.Dispose();
+                    openSourcePacks.Clear();
+
+                    // Move new pack files
+                    output("Updating index database and applying file changes...");
+                    string[] oldPackFiles = Directory.GetFiles(m_BasePath, "pack_*.bin");
+                    foreach (var file in oldPackFiles)
+                    {
+                        try { File.Delete(file); } catch (Exception ex) { output(string.Format("[WARNING] Failed to delete old pack {0}: {1}", file, ex.Message)); }
+                    }
+
+                    string[] newPackFiles = Directory.GetFiles(tempDir, "pack_*.bin");
+                    foreach (var file in newPackFiles)
+                    {
+                        string destPath = Path.Combine(m_BasePath, Path.GetFileName(file));
+                        File.Move(file, destPath);
+                    }
+
+                    Directory.Delete(tempDir, true);
+
+                    // Update SQLite database in transaction
+                    using (var trans = m_Connection.BeginTransaction())
+                    {
+                        try
+                        {
+                            using (var cmd = m_Connection.CreateCommand())
+                            {
+                                cmd.CommandText = "DELETE FROM index_assets";
+                                cmd.ExecuteNonQuery();
+
+                                cmd.CommandText = "INSERT INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                foreach (var ne in newEntries)
+                                {
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, ne.Hash);
+                                    cmd.Parameters.AddWithValue(null, ne.PackFileID);
+                                    cmd.Parameters.AddWithValue(null, ne.Offset);
+                                    cmd.Parameters.AddWithValue(null, ne.Length);
+                                    cmd.ExecuteNonQuery();
+                                }
+
+                                cmd.CommandText = "DELETE FROM asset_map WHERE hash NOT IN (SELECT hash FROM index_assets)";
+                                cmd.ExecuteNonQuery();
+
+                                m_CurrentPackID = currentDestPackId;
+                                cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
+                                cmd.Parameters.Clear();
+                                cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
+                                cmd.ExecuteNonQuery();
+                            }
+                            trans.Commit();
+                        }
+                        catch (Exception ex)
+                        {
+                            trans.Rollback();
+                            output("[FATAL ERROR] Failed to commit SQLite transaction for defragmentation: " + ex.Message);
+                            throw;
+                        }
+                    }
+
+                    output(string.Format("Defragmentation finished. Compacted into {0} packfile(s).", m_CurrentPackID + 1));
+                }
+                finally
+                {
+                    foreach (var fs in openSourcePacks.Values) fs.Dispose();
+                    try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch {}
+                }
+            }
+        }
+
+        private void ScanPackFileResilient(string path, int packId, Action<string> output)
+        {
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                long length = fs.Length;
+                while (fs.Position < length)
+                {
+                    long offset = fs.Position;
+                    try
+                    {
+                        using (BinaryReader br = new BinaryReader(fs, Encoding.UTF8, true))
+                        {
+                            uint magic = br.ReadUInt32();
+                            if (magic != MAGIC_NUMBER)
+                            {
+                                fs.Seek(offset + 1, SeekOrigin.Begin);
+                                continue;
+                            }
+
+                            ushort version = br.ReadUInt16();
+                            byte[] uuidBytes = br.ReadBytes(16);
+                            string uuid = new UUID(uuidBytes, 0).ToString().ToLower().Replace("-", "");
+                            sbyte type = br.ReadSByte();
+                            long created = (version >= 2) ? br.ReadInt64() : 0;
+                            ushort nameLen = br.ReadUInt16();
+                            string name = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
+                            int dataLen = br.ReadInt32();
+                            byte[] dataBytes = br.ReadBytes(dataLen);
+                            string hash = ComputeHash(dataBytes);
+
+                            using (var cmd = m_Connection.CreateCommand())
+                            {
+                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                cmd.Parameters.AddWithValue(null, uuid);
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, (int)type);
+                                cmd.Parameters.AddWithValue(null, name);
+                                cmd.Parameters.AddWithValue(null, created);
+                                cmd.ExecuteNonQuery();
+
+                                cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                cmd.Parameters.Clear();
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, packId);
+                                cmd.Parameters.AddWithValue(null, offset);
+                                cmd.Parameters.AddWithValue(null, dataLen);
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        output(string.Format("[DEEP SCAN WARNING] Read error at offset {0} in pack {1}: {2}. Attempting to salvage next record...", offset, packId, ex.Message));
+                        try
+                        {
+                            fs.Seek(offset + 1, SeekOrigin.Begin);
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        public void RebuildIndexResilient(Action<string> output)
+        {
+            lock (m_Lock)
+            {
+                FlushBatch();
+                output("Starting AdvancedAssetService Deep Resilient Index Rebuild...");
+                ExecuteNonQuery("DELETE FROM index_assets; DELETE FROM asset_map;");
+                string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
+                Array.Sort(files);
+                foreach (string file in files)
+                {
+                    int packId = int.Parse(Path.GetFileNameWithoutExtension(file).Substring(5));
+                    output(string.Format("Salvaging packfile: {0}...", Path.GetFileName(file)));
+                    ScanPackFileResilient(file, packId, output);
+                }
+                output("Deep Resilient Index Rebuild finished.");
+            }
+        }
+
+        public List<KeyValuePair<string, string>> GetBrokenLinks()
+        {
+            List<KeyValuePair<string, string>> results = new List<KeyValuePair<string, string>>();
+            lock (m_Lock)
+            {
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT uuid, hash FROM asset_map WHERE hash NOT IN (SELECT hash FROM index_assets)";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            results.Add(new KeyValuePair<string, string>(reader.GetString(0), reader.GetString(1)));
+                        }
+                    }
+                }
+            }
+            return results;
+        }
     }
 }
