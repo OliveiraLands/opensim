@@ -973,6 +973,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 string tempDir = Path.Combine(m_BasePath, "defrag_tmp");
                 List<PackFileIndexEntry> newEntries = new List<PackFileIndexEntry>();
                 List<AssetMetadataRecord> newMapEntries = new List<AssetMetadataRecord>();
+                var writtenHashMetadata = new Dictionary<string, AssetMetadataRecord>(StringComparer.OrdinalIgnoreCase);
                 int currentDestPackId = 0;
 
                 if (!resume)
@@ -1019,6 +1020,12 @@ namespace OpenSim.Services.AdvancedAssetService
                         }
                     }
 
+                    // Populate writtenHashMetadata from loaded newMapEntries
+                    foreach (var nm in newMapEntries)
+                    {
+                        writtenHashMetadata[nm.Hash] = nm;
+                    }
+
                     // Find max pack ID in loaded entries
                     foreach (var ne in newEntries)
                     {
@@ -1050,27 +1057,132 @@ namespace OpenSim.Services.AdvancedAssetService
                             }
                             var entry = activeEntries[i];
 
-                            // Read from source pack
-                            if (!openSourcePacks.TryGetValue(entry.PackFileID, out FileStream sourceFs))
-                            {
-                                string sourcePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
-                                if (!File.Exists(sourcePackPath))
-                                {
-                                    output(string.Format("[ERROR] Source pack file missing: {0}. Skipping this asset.", sourcePackPath));
-                                    continue;
-                                }
-                                sourceFs = new FileStream(sourcePackPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                                openSourcePacks[entry.PackFileID] = sourceFs;
-                            }
-
                             try
                             {
+                                // Check if UUID is invalid (e.g. SHA-256 hash of 64 chars) and try to repair it via MySQL
+                                string correctedUuid = entry.UUID;
+                                if (entry.UUID.Length > 36)
+                                {
+                                    string resolvedUuid = null;
+                                    if (gridConnector != null)
+                                    {
+                                        try
+                                        {
+                                            resolvedUuid = gridConnector.GetUUIDByHash(entry.Hash);
+                                        }
+                                        catch {}
+                                    }
+
+                                    if (!string.IsNullOrEmpty(resolvedUuid) && UUID.TryParse(resolvedUuid, out UUID dummyId))
+                                    {
+                                        correctedUuid = dummyId.ToString().ToLower().Replace("-", "");
+                                        output(string.Format("Defrag Resolved invalid UUID '{0}' to correct UUID '{1}' via grid database.", entry.UUID, dummyId));
+                                    }
+                                    else
+                                    {
+                                        output(string.Format("Defrag Skipping invalid UUID '{0}' (no mapping found in grid database).", entry.UUID));
+                                        
+                                        // Still update progress and commit periodically when skipping
+                                        if ((i + 1) % 500 == 0 || (i + 1) == activeEntries.Count)
+                                        {
+                                            trans.Commit();
+                                            trans.Dispose();
+                                            UpdateCommandProgress("defrag", i + 1);
+                                            output(string.Format("Processed {0} / {1}...", i + 1, activeEntries.Count));
+                                            if ((i + 1) < activeEntries.Count)
+                                            {
+                                                trans = m_Connection.BeginTransaction();
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                }
+
+                                // Skip duplicate asset if it has already been written
+                                if (writtenHashMetadata.TryGetValue(entry.Hash, out var existingMeta))
+                                {
+                                    var nm = new AssetMetadataRecord
+                                    {
+                                        UUID = correctedUuid,
+                                        Hash = entry.Hash,
+                                        Type = existingMeta.Type,
+                                        Name = existingMeta.Name,
+                                        Created = existingMeta.Created
+                                    };
+
+                                    newMapEntries.Add(nm);
+
+                                    // Persist only in defrag_new_maps temp table since defrag_new_entries already contains this hash
+                                    using (var cmd = m_Connection.CreateCommand())
+                                    {
+                                        cmd.CommandText = "INSERT INTO defrag_new_maps (uuid, hash, type, name, created) VALUES (?, ?, ?, ?, ?)";
+                                        cmd.Parameters.AddWithValue(null, nm.UUID);
+                                        cmd.Parameters.AddWithValue(null, nm.Hash);
+                                        cmd.Parameters.AddWithValue(null, (int)nm.Type);
+                                        cmd.Parameters.AddWithValue(null, nm.Name);
+                                        cmd.Parameters.AddWithValue(null, nm.Created);
+                                        cmd.ExecuteNonQuery();
+                                    }
+
+                                    if ((i + 1) % 500 == 0 || (i + 1) == activeEntries.Count)
+                                    {
+                                        trans.Commit();
+                                        trans.Dispose();
+                                        UpdateCommandProgress("defrag", i + 1);
+                                        output(string.Format("Processed {0} / {1}...", i + 1, activeEntries.Count));
+                                        if ((i + 1) < activeEntries.Count)
+                                        {
+                                            trans = m_Connection.BeginTransaction();
+                                        }
+                                    }
+                                    continue;
+                                }
+
+                                // Read from source pack
+                                if (!openSourcePacks.TryGetValue(entry.PackFileID, out FileStream sourceFs))
+                                {
+                                    string sourcePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
+                                    if (!File.Exists(sourcePackPath))
+                                    {
+                                        output(string.Format("[ERROR] Source pack file missing: {0}. Skipping this asset.", sourcePackPath));
+                                        
+                                        // Still update progress and commit periodically when skipping
+                                        if ((i + 1) % 500 == 0 || (i + 1) == activeEntries.Count)
+                                        {
+                                            trans.Commit();
+                                            trans.Dispose();
+                                            UpdateCommandProgress("defrag", i + 1);
+                                            output(string.Format("Processed {0} / {1}...", i + 1, activeEntries.Count));
+                                            if ((i + 1) < activeEntries.Count)
+                                            {
+                                                trans = m_Connection.BeginTransaction();
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    sourceFs = new FileStream(sourcePackPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                                    openSourcePacks[entry.PackFileID] = sourceFs;
+                                }
+
                                 sourceFs.Seek(entry.Offset, SeekOrigin.Begin);
                                 using (BinaryReader sourceBr = new BinaryReader(sourceFs, Encoding.UTF8, true))
                                 {
                                     if (sourceBr.ReadUInt32() != MAGIC_NUMBER)
                                     {
                                         output(string.Format("[ERROR] Magic number mismatch for hash {0}. Skipping.", entry.Hash));
+                                        
+                                        // Still update progress and commit periodically when skipping
+                                        if ((i + 1) % 500 == 0 || (i + 1) == activeEntries.Count)
+                                        {
+                                            trans.Commit();
+                                            trans.Dispose();
+                                            UpdateCommandProgress("defrag", i + 1);
+                                            output(string.Format("Processed {0} / {1}...", i + 1, activeEntries.Count));
+                                            if ((i + 1) < activeEntries.Count)
+                                            {
+                                                trans = m_Connection.BeginTransaction();
+                                            }
+                                        }
                                         continue;
                                     }
                                     ushort version = sourceBr.ReadUInt16();
@@ -1083,32 +1195,6 @@ namespace OpenSim.Services.AdvancedAssetService
                                     byte[] dataBytes = sourceBr.ReadBytes(dataLen);
 
                                     string name = Encoding.UTF8.GetString(nameBytes);
-
-                                    // Check if UUID is invalid (e.g. SHA-256 hash of 64 chars) and try to repair it via MySQL
-                                    string correctedUuid = entry.UUID;
-                                    if (entry.UUID.Length > 36)
-                                    {
-                                        string resolvedUuid = null;
-                                        if (gridConnector != null)
-                                        {
-                                            try
-                                            {
-                                                resolvedUuid = gridConnector.GetUUIDByHash(entry.Hash);
-                                            }
-                                            catch {}
-                                        }
-
-                                        if (!string.IsNullOrEmpty(resolvedUuid) && UUID.TryParse(resolvedUuid, out UUID dummyId))
-                                        {
-                                            correctedUuid = dummyId.ToString().ToLower().Replace("-", "");
-                                            output(string.Format("Defrag Resolved invalid UUID '{0}' to correct UUID '{1}' via grid database.", entry.UUID, dummyId));
-                                        }
-                                        else
-                                        {
-                                            output(string.Format("Defrag Skipping invalid UUID '{0}' (no mapping found in grid database).", entry.UUID));
-                                            continue;
-                                        }
-                                    }
 
                                     byte[] finalUuidBytes = uuidBytes;
                                     if (correctedUuid != entry.UUID)
@@ -1156,6 +1242,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
                                     newEntries.Add(ne);
                                     newMapEntries.Add(nm);
+                                    writtenHashMetadata[entry.Hash] = nm;
 
                                     // Persist in temp tables
                                     using (var cmd = m_Connection.CreateCommand())
