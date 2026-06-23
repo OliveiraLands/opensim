@@ -109,5 +109,103 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                 try { Directory.Delete("test_asset_packs", true); } catch {}
             }
         }
+
+        [Test]
+        public void TestSuspiciousAssetsLifecycle()
+        {
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+
+            AdvancedAssetService service = CreateService();
+            
+            UUID uuid1 = UUID.Random();
+            UUID uuid2 = UUID.Random();
+            byte[] data = new byte[] { 0x11, 0x22, 0x33 };
+            byte[] data2 = new byte[] { 0x44, 0x55, 0x66 };
+
+            AssetBase asset1 = new AssetBase(uuid1, "Asset 1", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = data };
+            AssetBase asset2 = new AssetBase(uuid2, "Asset 2", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = data2 };
+
+            service.Store(asset1);
+            service.Store(asset2);
+
+            // Access m_PackManager using reflection
+            var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.That(packManagerField, Is.Not.Null);
+            var packManager = packManagerField.GetValue(service);
+            Assert.That(packManager, Is.Not.Null);
+
+            // Set uuid2 as suspicious
+            var setSuspMethod = packManager.GetType().GetMethod("SetSuspiciousAssets");
+            Assert.That(setSuspMethod, Is.Not.Null);
+            setSuspMethod.Invoke(packManager, new object[] { new string[] { uuid2.ToString() } });
+
+            // Defragment
+            var defragMethod = packManager.GetType().GetMethod("Defragment");
+            Assert.That(defragMethod, Is.Not.Null);
+            List<string> logs = new List<string>();
+            defragMethod.Invoke(packManager, new object[] { null, new Action<string>(msg => logs.Add(msg)) });
+
+            // Verify uuid1 (not suspicious) is still there and readable
+            AssetBase retrieved1 = service.Get(uuid1.ToString());
+            Assert.That(retrieved1, Is.Not.Null);
+            Assert.That(retrieved1.Data, Is.EqualTo(data));
+
+            // Verify uuid2 (suspicious and not accessed) has been excluded/deleted by defrag
+            AssetBase retrieved2 = service.Get(uuid2.ToString());
+            Assert.That(retrieved2, Is.Null);
+
+            // Cleanup
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+        }
+
+        [Test]
+        public void TestSuspiciousAssetClearedOnRead()
+        {
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+
+            AdvancedAssetService service = CreateService();
+            
+            UUID uuid1 = UUID.Random();
+            byte[] data = new byte[] { 0x77, 0x88, 0x99 };
+            AssetBase asset1 = new AssetBase(uuid1, "Asset 1", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = data };
+            service.Store(asset1);
+
+            // Access packManager
+            var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var packManager = packManagerField.GetValue(service);
+
+            // Mark uuid1 as suspicious
+            var setSuspMethod = packManager.GetType().GetMethod("SetSuspiciousAssets");
+            setSuspMethod.Invoke(packManager, new object[] { new string[] { uuid1.ToString() } });
+
+            // Read uuid1 -> this should clear the suspicious status!
+            AssetBase retrieved = service.Get(uuid1.ToString());
+            Assert.That(retrieved, Is.Not.Null);
+            Assert.That(retrieved.Data, Is.EqualTo(data));
+
+            // Defragment -> since suspicious status was cleared, defrag should NOT delete it
+            var defragMethod = packManager.GetType().GetMethod("Defragment");
+            List<string> logs = new List<string>();
+            defragMethod.Invoke(packManager, new object[] { null, new Action<string>(msg => logs.Add(msg)) });
+
+            // It should still be present
+            AssetBase retrievedAfterDefrag = service.Get(uuid1.ToString());
+            Assert.That(retrievedAfterDefrag, Is.Not.Null);
+            Assert.That(retrievedAfterDefrag.Data, Is.EqualTo(data));
+
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+        }
     }
 }

@@ -47,6 +47,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private int m_CurrentPackID = 0;
         private long m_MaxPackSize = 512 * 1024 * 1024;
         private object m_Lock = new object();
+        private HashSet<string> m_SuspiciousCache = null;
 
         public int CurrentPackID
         {
@@ -77,6 +78,93 @@ namespace OpenSim.Services.AdvancedAssetService
             m_WriteTask = Task.Factory.StartNew(ProcessWriteQueue, TaskCreationOptions.LongRunning);
         }
 
+        public void ClearSuspiciousStatus(string uuid)
+        {
+            if (m_SuspiciousCache == null)
+            {
+                lock (m_Lock)
+                {
+                    if (m_SuspiciousCache == null)
+                    {
+                        m_SuspiciousCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        using (var cmd = m_Connection.CreateCommand())
+                        {
+                            cmd.CommandText = "SELECT uuid FROM suspicious_assets";
+                            using (var reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read())
+                                {
+                                    m_SuspiciousCache.Add(reader.GetString(0));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (m_SuspiciousCache.Count > 0 && m_SuspiciousCache.Contains(uuid))
+            {
+                lock (m_Lock)
+                {
+                    m_SuspiciousCache.Remove(uuid);
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "DELETE FROM suspicious_assets WHERE uuid = ?";
+                        cmd.Parameters.AddWithValue(null, uuid);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+
+        public void SetSuspiciousAssets(IEnumerable<string> uuids)
+        {
+            lock (m_Lock)
+            {
+                using (var trans = m_Connection.BeginTransaction())
+                {
+                    try
+                    {
+                        using (var cmd = m_Connection.CreateCommand())
+                        {
+                            cmd.CommandText = "DELETE FROM suspicious_assets";
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        m_SuspiciousCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                        using (var cmd = m_Connection.CreateCommand())
+                        {
+                            cmd.CommandText = "INSERT INTO suspicious_assets (uuid, flagged_at) VALUES (?, ?)";
+                            var p1 = cmd.CreateParameter();
+                            var p2 = cmd.CreateParameter();
+                            cmd.Parameters.Add(p1);
+                            cmd.Parameters.Add(p2);
+
+                            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+                            foreach (var uuid in uuids)
+                            {
+                                string nid = NormalizeUUID(uuid);
+                                if (m_SuspiciousCache.Add(nid))
+                                {
+                                    p1.Value = nid;
+                                    p2.Value = now;
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+                        }
+                        trans.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        try { trans.Rollback(); } catch {}
+                        m_log.Error("[ADVANCED ASSET SERVICE]: Failed to save suspicious assets: " + ex.Message);
+                    }
+                }
+            }
+        }
+
         private void InitializeDatabase()
         {
             lock (m_Lock)
@@ -101,6 +189,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     try { ExecuteNonQuery("ALTER TABLE asset_map ADD COLUMN synced INTEGER DEFAULT 0"); } catch { }
                     try { ExecuteNonQuery("CREATE INDEX idx_asset_sync ON asset_map(synced)"); } catch { }
                 }
+                ExecuteNonQuery("CREATE TABLE IF NOT EXISTS suspicious_assets (uuid TEXT PRIMARY KEY COLLATE NOCASE, flagged_at INTEGER)");
                 LoadConfig();
             }
         }
@@ -251,6 +340,7 @@ namespace OpenSim.Services.AdvancedAssetService
                             return null;
                         }
                     }
+                    ClearSuspiciousStatus(nid);
                     return data;
                 }
             }
@@ -935,11 +1025,11 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 FlushBatch();
                 
-                // 1. Get all active mappings (UUID -> Hash) and their physical entries
+                // 1. Get all active mappings (UUID -> Hash) and their physical entries, excluding suspicious assets
                 List<DefragRecord> activeEntries = new List<DefragRecord>();
                 using (var cmd = m_Connection.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT am.uuid, ia.hash, ia.pack_id, ia.offset, ia.length FROM index_assets ia INNER JOIN asset_map am ON am.hash = ia.hash";
+                    cmd.CommandText = "SELECT am.uuid, ia.hash, ia.pack_id, ia.offset, ia.length FROM index_assets ia INNER JOIN asset_map am ON am.hash = ia.hash WHERE am.uuid NOT IN (SELECT uuid FROM suspicious_assets)";
                     using (var reader = cmd.ExecuteReader())
                     {
                         while (reader.Read())
@@ -1352,11 +1442,11 @@ namespace OpenSim.Services.AdvancedAssetService
                                 cmd.Parameters.Clear();
                                 cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
                                 cmd.ExecuteNonQuery();
-
-                                cmd.CommandText = "DROP TABLE IF EXISTS defrag_new_entries; DROP TABLE IF EXISTS defrag_new_maps;";
+                                cmd.CommandText = "DROP TABLE IF EXISTS defrag_new_entries; DROP TABLE IF EXISTS defrag_new_maps; DELETE FROM suspicious_assets;";
                                 cmd.ExecuteNonQuery();
                             }
                             ClearCommandProgress("defrag");
+                            m_SuspiciousCache = null;
                             finalTrans.Commit();
                         }
                         catch (Exception ex)

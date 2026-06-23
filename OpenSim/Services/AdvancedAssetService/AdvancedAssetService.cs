@@ -16,6 +16,8 @@ using OpenSim.Services.Interfaces;
 using System.IO.Compression;
 using OpenSim.Data;
 using System.Timers;
+using MySql.Data.MySqlClient;
+using System.Data.SQLite;
 
 namespace OpenSim.Services.AdvancedAssetService
 {
@@ -120,6 +122,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask>", "Scan inventories and region databases to identify used assets, marking unused ones as suspicious", HandleScanUsedAssets);
         }
 
         public virtual AssetBase Get(string id)
@@ -1108,6 +1111,395 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
             m_PackManager.RebuildIndexResilient(msg => MainConsole.Instance.Output("AAS Repair: " + msg));
+        }
+
+        private void HandleScanUsedAssets(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Usage: aas scan-used-assets <db_mask> (e.g. 'os_%')");
+                return;
+            }
+
+            string dbMask = args[2];
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("Grid database is not configured.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Loading inventory database plugin...");
+            IXInventoryData invDatabase;
+            try
+            {
+                invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to load inventory database: " + ex.Message);
+                return;
+            }
+
+            if (invDatabase == null)
+            {
+                MainConsole.Instance.Output("Failed to instantiate inventory database plugin.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning inventory items from database...");
+            XInventoryItem[] items;
+            try
+            {
+                items = invDatabase.GetItems(new string[0], new string[0]);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to query inventory items: " + ex.Message);
+                return;
+            }
+
+            HashSet<string> usedUuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> uuidSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            int invCount = 0;
+            if (items != null)
+            {
+                foreach (var item in items)
+                {
+                    if (item.assetID != UUID.Zero)
+                    {
+                        string nid = item.assetID.ToString().ToLower().Replace("-", "");
+                        if (usedUuids.Add(nid))
+                        {
+                            uuidSources[nid] = "Inventory";
+                            invCount++;
+                        }
+                    }
+                }
+            }
+            MainConsole.Instance.Output(string.Format("Found {0} used asset references in inventory.", invCount));
+
+            if (m_DatabaseProvider.Contains("MySQL") || m_DatabaseProvider.Contains("MySql"))
+            {
+                MainConsole.Instance.Output("Connecting to MySQL to scan region databases matching mask: " + dbMask);
+                try
+                {
+                    using (MySqlConnection myConn = new MySqlConnection(m_DatabaseConnectionString))
+                    {
+                        myConn.Open();
+
+                        // 1. Get matching databases
+                        List<string> databases = new List<string>();
+                        using (MySqlCommand cmd = myConn.CreateCommand())
+                        {
+                            cmd.CommandText = "SHOW DATABASES LIKE @mask";
+                            cmd.Parameters.AddWithValue("@mask", dbMask);
+                            using (var reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read())
+                                {
+                                    databases.Add(reader.GetString(0));
+                                }
+                            }
+                        }
+
+                        MainConsole.Instance.Output(string.Format("Found {0} matching region databases on the server.", databases.Count));
+
+                        foreach (string db in databases)
+                        {
+                            MainConsole.Instance.Output(string.Format("Scanning database '{0}'...", db));
+                            try
+                            {
+                                // 2. Check which tables exist in this database
+                                HashSet<string> existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                using (MySqlCommand cmd = myConn.CreateCommand())
+                                {
+                                    cmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @db";
+                                    cmd.Parameters.AddWithValue("@db", db);
+                                    using (var reader = cmd.ExecuteReader())
+                                    {
+                                        while (reader.Read())
+                                        {
+                                            existingTables.Add(reader.GetString(0));
+                                        }
+                                    }
+                                }
+
+                                // 3. Scan primitems
+                                if (existingTables.Contains("primitems"))
+                                {
+                                    int itemsCount = 0;
+                                    using (MySqlCommand cmd = myConn.CreateCommand())
+                                    {
+                                        cmd.CommandText = string.Format("SELECT DISTINCT assetID FROM `{0}`.primitems WHERE assetID IS NOT NULL AND assetID != '00000000-0000-0000-0000-000000000000'", db);
+                                        using (var reader = cmd.ExecuteReader())
+                                        {
+                                            while (reader.Read())
+                                            {
+                                                string rawId = reader.GetString(0);
+                                                if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
+                                                {
+                                                    string nid = uuid.ToString().ToLower().Replace("-", "");
+                                                    if (usedUuids.Add(nid))
+                                                    {
+                                                        uuidSources[nid] = string.Format("{0}.primitems", db);
+                                                        itemsCount++;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    MainConsole.Instance.Output(string.Format("  Found {0} used assets in {1}.primitems", itemsCount, db));
+                                }
+
+                                // 4. Scan primshapes
+                                if (existingTables.Contains("primshapes"))
+                                {
+                                    int texturesCount = 0;
+                                    List<byte[]> textureBlobs = new List<byte[]>();
+                                    using (MySqlCommand cmd = myConn.CreateCommand())
+                                    {
+                                        cmd.CommandText = string.Format("SELECT Texture FROM `{0}`.primshapes WHERE Texture IS NOT NULL", db);
+                                        using (var reader = cmd.ExecuteReader())
+                                        {
+                                            while (reader.Read())
+                                            {
+                                                if (!reader.IsDBNull(0))
+                                                {
+                                                    textureBlobs.Add((byte[])reader.GetValue(0));
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    foreach (var blob in textureBlobs)
+                                    {
+                                        try
+                                        {
+                                            OpenMetaverse.Primitive.TextureEntry te = new OpenMetaverse.Primitive.TextureEntry(blob, 0, blob.Length);
+                                            if (te != null)
+                                            {
+                                                if (te.DefaultTexture != null && te.DefaultTexture.TextureID != UUID.Zero)
+                                                {
+                                                    string nid = te.DefaultTexture.TextureID.ToString().ToLower().Replace("-", "");
+                                                    if (usedUuids.Add(nid))
+                                                    {
+                                                        uuidSources[nid] = string.Format("{0}.primshapes (DefaultTexture)", db);
+                                                        texturesCount++;
+                                                    }
+                                                }
+                                                if (te.FaceTextures != null)
+                                                {
+                                                    foreach (var face in te.FaceTextures)
+                                                    {
+                                                        if (face != null && face.TextureID != UUID.Zero)
+                                                        {
+                                                            string nid = face.TextureID.ToString().ToLower().Replace("-", "");
+                                                            if (usedUuids.Add(nid))
+                                                            {
+                                                                uuidSources[nid] = string.Format("{0}.primshapes (FaceTexture)", db);
+                                                                texturesCount++;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        catch {}
+                                    }
+
+                                    // 4b. Check other columns in primshapes (normal_map_texture, specular_map_texture)
+                                    List<string> extraCols = new List<string>();
+                                    using (MySqlCommand cmd = myConn.CreateCommand())
+                                    {
+                                        cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'primshapes' AND COLUMN_NAME IN ('normal_map_texture', 'specular_map_texture')";
+                                        cmd.Parameters.AddWithValue("@db", db);
+                                        using (var reader = cmd.ExecuteReader())
+                                        {
+                                            while (reader.Read())
+                                            {
+                                                extraCols.Add(reader.GetString(0));
+                                            }
+                                        }
+                                    }
+
+                                    foreach (var col in extraCols)
+                                    {
+                                        int colCount = 0;
+                                        using (MySqlCommand cmd = myConn.CreateCommand())
+                                        {
+                                            cmd.CommandText = string.Format("SELECT DISTINCT `{0}` FROM `{1}`.primshapes WHERE `{0}` IS NOT NULL AND `{0}` != '' AND `{0}` != '00000000-0000-0000-0000-000000000000'", col, db);
+                                            using (var reader = cmd.ExecuteReader())
+                                            {
+                                                while (reader.Read())
+                                                {
+                                                    string rawId = reader.GetString(0);
+                                                    if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
+                                                    {
+                                                        string nid = uuid.ToString().ToLower().Replace("-", "");
+                                                        if (usedUuids.Add(nid))
+                                                        {
+                                                            uuidSources[nid] = string.Format("{0}.primshapes ({1})", db, col);
+                                                            colCount++;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        MainConsole.Instance.Output(string.Format("  Found {0} used assets in {1}.primshapes ({2})", colCount, db, col));
+                                    }
+
+                                    MainConsole.Instance.Output(string.Format("  Found {0} used texture assets in {1}.primshapes (Texture Entry)", texturesCount, db));
+                                }
+
+                                // 5. Scan regionsettings
+                                if (existingTables.Contains("regionsettings"))
+                                {
+                                    List<string> rsCols = new List<string>();
+                                    using (MySqlCommand cmd = myConn.CreateCommand())
+                                    {
+                                        cmd.CommandText = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'regionsettings' AND (COLUMN_NAME LIKE '%texture%' OR COLUMN_NAME LIKE '%Terrain%')";
+                                        cmd.Parameters.AddWithValue("@db", db);
+                                        using (var reader = cmd.ExecuteReader())
+                                        {
+                                            while (reader.Read())
+                                            {
+                                                rsCols.Add(reader.GetString(0));
+                                            }
+                                        }
+                                    }
+
+                                    foreach (var col in rsCols)
+                                    {
+                                        int colCount = 0;
+                                        using (MySqlCommand cmd = myConn.CreateCommand())
+                                        {
+                                            cmd.CommandText = string.Format("SELECT DISTINCT `{0}` FROM `{1}`.regionsettings WHERE `{0}` IS NOT NULL AND `{0}` != '' AND `{0}` != '00000000-0000-0000-0000-000000000000'", col, db);
+                                            using (var reader = cmd.ExecuteReader())
+                                            {
+                                                while (reader.Read())
+                                                {
+                                                    string rawId = reader.GetString(0);
+                                                    if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
+                                                    {
+                                                        string nid = uuid.ToString().ToLower().Replace("-", "");
+                                                        if (usedUuids.Add(nid))
+                                                        {
+                                                            uuidSources[nid] = string.Format("{0}.regionsettings ({1})", db, col);
+                                                            colCount++;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (colCount > 0)
+                                        {
+                                            MainConsole.Instance.Output(string.Format("  Found {0} used assets in {1}.regionsettings ({2})", colCount, db, col));
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                MainConsole.Instance.Output(string.Format("Error scanning database '{0}': {1}", db, ex.Message));
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output("MySQL scan error: " + ex.Message);
+                }
+            }
+            else
+            {
+                MainConsole.Instance.Output("Database provider is not MySQL/MariaDB. Database matching skipped.");
+            }
+
+            // Write to SQLite base of used assets
+            MainConsole.Instance.Output("Saving used assets to SQLite database: used_assets.db...");
+            string usedDbPath = Path.Combine(m_StoragePath, "used_assets.db");
+            if (File.Exists(usedDbPath))
+            {
+                try { File.Delete(usedDbPath); } catch {}
+            }
+
+            try
+            {
+                using (SQLiteConnection SQLiteConn = new SQLiteConnection(string.Format("Data Source={0};Version=3;", usedDbPath)))
+                {
+                    SQLiteConn.Open();
+                    using (SQLiteCommand cmd = SQLiteConn.CreateCommand())
+                    {
+                        cmd.CommandText = "CREATE TABLE used_assets (uuid TEXT PRIMARY KEY, source TEXT)";
+                        cmd.ExecuteNonQuery();
+                    }
+
+                    using (SQLiteTransaction trans = SQLiteConn.BeginTransaction())
+                    {
+                        using (SQLiteCommand cmd = SQLiteConn.CreateCommand())
+                        {
+                            cmd.CommandText = "INSERT OR IGNORE INTO used_assets (uuid, source) VALUES (?, ?)";
+                            var p1 = cmd.CreateParameter();
+                            var p2 = cmd.CreateParameter();
+                            cmd.Parameters.Add(p1);
+                            cmd.Parameters.Add(p2);
+
+                            foreach (var nid in usedUuids)
+                            {
+                                p1.Value = nid;
+                                p2.Value = uuidSources[nid];
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+                        trans.Commit();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error creating used_assets.db: " + ex.Message);
+            }
+
+            MainConsole.Instance.Output("Evaluating used assets presence in AdvancedAssetService (AAS)...");
+            int foundInAas = 0;
+            int missingInAas = 0;
+
+            foreach (var nid in usedUuids)
+            {
+                if (m_PackManager.AssetExists(nid))
+                {
+                    foundInAas++;
+                }
+                else
+                {
+                    missingInAas++;
+                }
+            }
+
+            MainConsole.Instance.Output(string.Format("Scan Result:"));
+            MainConsole.Instance.Output(string.Format("  Total unique used assets: {0}", usedUuids.Count));
+            MainConsole.Instance.Output(string.Format("  Present in AAS:           {0}", foundInAas));
+            MainConsole.Instance.Output(string.Format("  Missing in AAS:           {0}", missingInAas));
+
+            // Mark unused ones in AAS as suspicious
+            MainConsole.Instance.Output("Identifying unused assets in AAS to flag as suspicious...");
+            List<AssetMetadataRecord> allAasAssets = m_PackManager.GetAllAssets();
+            List<string> unusedUuids = new List<string>();
+
+            foreach (var meta in allAasAssets)
+            {
+                if (!usedUuids.Contains(meta.UUID))
+                {
+                    unusedUuids.Add(meta.UUID);
+                }
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} unused assets in AAS. Flagging them as suspicious...", unusedUuids.Count));
+            m_PackManager.SetSuspiciousAssets(unusedUuids);
+
+            MainConsole.Instance.Output("Scan completed successfully. Flagged assets can be deleted in the next defrag/pack.");
         }
 
         private void HandleAuditGrid(string module, string[] args)
