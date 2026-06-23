@@ -124,8 +124,17 @@ namespace OpenSim.Data.SQLite
 
         public virtual T[] Get(string[] fields, string[] keys)
         {
-            if (fields.Length != keys.Length)
+            if (fields == null || keys == null || fields.Length != keys.Length)
                 return new T[0];
+
+            if (fields.Length == 0)
+            {
+                using (SQLiteCommand cmd = new SQLiteCommand())
+                {
+                    cmd.CommandText = string.Format("select * from {0}", m_Realm);
+                    return DoQuery(cmd);
+                }
+            }
 
             List<string> terms = new List<string>();
 

@@ -235,8 +235,20 @@ namespace OpenSim.Data.PGSQL
 
         public virtual T[] Get(string[] fields, string[] keys)
         {
-            if (fields.Length != keys.Length)
+            if (fields == null || keys == null || fields.Length != keys.Length)
                 return new T[0];
+
+            if (fields.Length == 0)
+            {
+                using (NpgsqlConnection conn = new NpgsqlConnection(m_ConnectionString))
+                using (NpgsqlCommand cmd = new NpgsqlCommand())
+                {
+                    cmd.Connection = conn;
+                    cmd.CommandText = string.Format("SELECT * FROM {0}", m_Realm);
+                    conn.Open();
+                    return DoQuery(cmd);
+                }
+            }
 
             List<string> terms = new List<string>();
 

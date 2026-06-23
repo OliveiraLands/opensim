@@ -158,9 +158,18 @@ namespace OpenSim.Data.MySQL
 
         public virtual T[] Get(string[] fields, string[] keys, string options)
         {
-            int flen = fields.Length;
-            if (flen == 0 || flen != keys.Length)
+            if (fields == null || keys == null || fields.Length != keys.Length)
                 return new T[0];
+
+            int flen = fields.Length;
+            if (flen == 0)
+            {
+                using (MySqlCommand cmd = new MySqlCommand())
+                {
+                    cmd.CommandText = string.Format("select * from {0} {1}", m_Realm, options).Trim();
+                    return DoQuery(cmd);
+                }
+            }
 
             int flast = flen - 1;
             StringBuilder sb = new StringBuilder(1024);
