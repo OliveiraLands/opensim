@@ -840,6 +840,88 @@ namespace OpenSim.Services.AdvancedAssetService
             }
         }
 
+        public Dictionary<string, object> GetStats()
+        {
+            var stats = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+            lock (m_Lock)
+            {
+                // 1. Database sizes and files
+                stats["BasePath"] = m_BasePath;
+                stats["IndexFile"] = m_IndexFile;
+                
+                try
+                {
+                    if (File.Exists(m_IndexFile))
+                        stats["IndexFileSize"] = new FileInfo(m_IndexFile).Length;
+                    else
+                        stats["IndexFileSize"] = 0L;
+                }
+                catch { stats["IndexFileSize"] = -1L; }
+
+                // 2. Packfiles size and count
+                try
+                {
+                    string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
+                    stats["PackFilesCount"] = (long)files.Length;
+                    long totalSize = 0;
+                    foreach (var file in files)
+                    {
+                        totalSize += new FileInfo(file).Length;
+                    }
+                    stats["PackFilesTotalSize"] = totalSize;
+                }
+                catch
+                {
+                    stats["PackFilesCount"] = -1L;
+                    stats["PackFilesTotalSize"] = -1L;
+                }
+
+                // 3. Database counts
+                try
+                {
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT COUNT(*) FROM index_assets";
+                        stats["TotalUniqueDataBlocks"] = (long)cmd.ExecuteScalar();
+                    }
+                }
+                catch { stats["TotalUniqueDataBlocks"] = -1L; }
+
+                try
+                {
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT COUNT(*) FROM asset_map";
+                        stats["TotalUniqueAssets"] = (long)cmd.ExecuteScalar();
+                    }
+                }
+                catch { stats["TotalUniqueAssets"] = -1L; }
+
+                try
+                {
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT COUNT(*) FROM suspicious_assets";
+                        stats["TotalSuspiciousAssets"] = (long)cmd.ExecuteScalar();
+                    }
+                }
+                catch { stats["TotalSuspiciousAssets"] = -1L; }
+
+                try
+                {
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT COUNT(*) FROM asset_map WHERE synced = 0";
+                        stats["TotalUnsyncedAssets"] = (long)cmd.ExecuteScalar();
+                    }
+                }
+                catch { stats["TotalUnsyncedAssets"] = -1L; }
+            }
+
+            return stats;
+        }
+
         public void VerifyIntegrity(Action<string> output)
         {
             output("Starting AdvancedAssetService Integrity Verification...");

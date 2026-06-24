@@ -110,14 +110,15 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-legacy", "aas import-legacy <path>", "Bulk import assets from FSAssetService structure", HandleImportLegacy);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-legacy", "aas export-legacy <path>", "Bulk export assets to FSAssetService structure", HandleExportLegacy);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas search-content", "aas search-content <string>", "Search assets for content", HandleSearchContent);
-            MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify all assets integrity", HandleVerify);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify that all inventory items exist in Advanced Asset Service", HandleVerify);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas status", "aas status", "Show useful statistics and status of Advanced Asset Service", HandleStatus);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas rebuild-index", "aas rebuild-index", "Rebuild the SQLite index from PackFiles", HandleRebuildIndex);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-cache", "aas import-cache <path>", "Bulk import assets from Flotsam file cache", HandleImportCache);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-s3", "aas sync-s3", "Force synchronization of assets with S3", HandleSyncS3);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas sync-database", "aas sync-database", "Force full synchronization of assets with the grid database", HandleSyncDatabase);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-raw", "aas import-raw <path>", "Bulk import raw uncompressed assets named by UUID", HandleImportRaw);
-            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path>", "Scan inventory database and import missing assets from an external folder", HandleScanInventory);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path|url>", "Scan inventory database and import missing assets from an external folder or asset server URL", HandleScanInventory);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas defrag", "aas defrag", "Defragment PackFiles and release dead storage space", HandleDefragment);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
@@ -793,11 +794,13 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             if (args.Length < 3)
             {
-                MainConsole.Instance.Output("Syntax: aas scan-inventory <path>");
+                MainConsole.Instance.Output("Syntax: aas scan-inventory <path|url>");
                 return;
             }
             string path = args[2];
-            if (!Directory.Exists(path))
+            bool isUrl = path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+            if (!isUrl && !Directory.Exists(path))
             {
                 MainConsole.Instance.Output("Directory not found: " + path);
                 return;
@@ -880,50 +883,59 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
 
-            MainConsole.Instance.Output("Scanning external folder for asset files...");
-            string[] allFiles;
-            try
-            {
-                allFiles = SafeGetFiles(path).ToArray();
-            }
-            catch (Exception ex)
-            {
-                MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
-                return;
-            }
+            Dictionary<string, string> filesByName = null;
 
-            MainConsole.Instance.Output(string.Format("Found {0} files in external folder. Indexing files...", allFiles.Length));
-            
-            Dictionary<string, string> filesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (string file in allFiles)
+            if (!isUrl)
             {
-                string filename = Path.GetFileName(file);
-                string normName = filename.ToLower().Replace("-", "");
-                filesByName[normName] = file;
-
-                if (filename.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+                MainConsole.Instance.Output("Scanning external folder for asset files...");
+                string[] allFiles;
+                try
                 {
-                    string withoutGz = filename.Substring(0, filename.Length - 3);
-                    string normWithoutGz = withoutGz.ToLower().Replace("-", "");
-                    filesByName[normWithoutGz] = file;
+                    allFiles = SafeGetFiles(path).ToArray();
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
+                    return;
+                }
 
-                    if (withoutGz.Contains("."))
+                MainConsole.Instance.Output(string.Format("Found {0} files in external folder. Indexing files...", allFiles.Length));
+
+                filesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string file in allFiles)
+                {
+                    string filename = Path.GetFileName(file);
+                    string normName = filename.ToLower().Replace("-", "");
+                    filesByName[normName] = file;
+
+                    if (filename.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
                     {
-                        string uuidPart = withoutGz.Split('.')[0];
+                        string withoutGz = filename.Substring(0, filename.Length - 3);
+                        string normWithoutGz = withoutGz.ToLower().Replace("-", "");
+                        filesByName[normWithoutGz] = file;
+
+                        if (withoutGz.Contains("."))
+                        {
+                            string uuidPart = withoutGz.Split('.')[0];
+                            string normUuidPart = uuidPart.ToLower().Replace("-", "");
+                            filesByName[normUuidPart] = file;
+                        }
+                    }
+
+                    string withoutExt = Path.GetFileNameWithoutExtension(file);
+                    string normWithoutExt = withoutExt.ToLower().Replace("-", "");
+                    filesByName[normWithoutExt] = file;
+                    if (withoutExt.Contains("."))
+                    {
+                        string uuidPart = withoutExt.Split('.')[0];
                         string normUuidPart = uuidPart.ToLower().Replace("-", "");
                         filesByName[normUuidPart] = file;
                     }
                 }
-
-                string withoutExt = Path.GetFileNameWithoutExtension(file);
-                string normWithoutExt = withoutExt.ToLower().Replace("-", "");
-                filesByName[normWithoutExt] = file;
-                if (withoutExt.Contains("."))
-                {
-                    string uuidPart = withoutExt.Split('.')[0];
-                    string normUuidPart = uuidPart.ToLower().Replace("-", "");
-                    filesByName[normUuidPart] = file;
-                }
+            }
+            else
+            {
+                MainConsole.Instance.Output("Using remote asset server URL: " + path);
             }
 
             MainConsole.Instance.Output("Searching and importing missing assets...");
@@ -1004,67 +1016,82 @@ namespace OpenSim.Services.AdvancedAssetService
                         }
                     }
 
-                    // 2. Locate file in the indexed external files
-                    // First search by UUID (normalized)
-                    if (filesByName.TryGetValue(normUuid, out string fileByUuid))
-                    {
-                        matchedFilePath = fileByUuid;
-                    }
-                    // If content hash was found, search by Hash
-                    else if (!string.IsNullOrEmpty(dbHash))
-                    {
-                        string normHash = dbHash.ToLower().Replace("-", "");
-                        if (filesByName.TryGetValue(normHash, out string fileByHash))
-                        {
-                            matchedFilePath = fileByHash;
-                        }
-                    }
-
-                    if (string.IsNullOrEmpty(matchedFilePath))
-                    {
-                        notFoundCount++;
-                        m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
-                        m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
-                        continue;
-                    }
-
-                    // 3. Read and import the file
                     byte[] extData = null;
-                    string ext = Path.GetExtension(matchedFilePath).ToLower();
 
-                    if (ext == ".gz")
+                    if (isUrl)
                     {
-                        using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
-                        using (MemoryStream ms = new MemoryStream())
+                        extData = FetchAssetFromUrl(path, assetID.ToString(), ref type, ref name);
+                        if (extData == null || extData.Length == 0)
                         {
-                            gz.CopyTo(ms);
-                            extData = ms.ToArray();
+                            notFoundCount++;
+                            m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
+                            m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
+                            continue;
                         }
                     }
                     else
                     {
-                        byte[] fileBytes = File.ReadAllBytes(matchedFilePath);
-                        // Check if it is Flotsam BinaryFormatter serialized cache file
-                        bool isFlotsam = false;
-                        if (fileBytes.Length > 9 && fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && fileBytes[4] == 0x00 && fileBytes[5] == 0xff && fileBytes[6] == 0xff && fileBytes[7] == 0xff && fileBytes[8] == 0xff)
+                        // 2. Locate file in the indexed external files
+                        // First search by UUID (normalized)
+                        if (filesByName.TryGetValue(normUuid, out string fileByUuid))
                         {
-                            isFlotsam = true;
+                            matchedFilePath = fileByUuid;
+                        }
+                        // If content hash was found, search by Hash
+                        else if (!string.IsNullOrEmpty(dbHash))
+                        {
+                            string normHash = dbHash.ToLower().Replace("-", "");
+                            if (filesByName.TryGetValue(normHash, out string fileByHash))
+                            {
+                                matchedFilePath = fileByHash;
+                            }
                         }
 
-                        if (isFlotsam)
+                        if (string.IsNullOrEmpty(matchedFilePath))
                         {
-                            #pragma warning disable SYSLIB0011
-                            using (MemoryStream ms = new MemoryStream(fileBytes))
+                            notFoundCount++;
+                            m_PackManager.UpdateCommandProgress("scan-inventory", i + 1);
+                            m_PackManager.SetConfig("cmd_state:scan-inventory:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
+                            continue;
+                        }
+
+                        // 3. Read and import the file
+                        string ext = Path.GetExtension(matchedFilePath).ToLower();
+
+                        if (ext == ".gz")
+                        {
+                            using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                            using (MemoryStream ms = new MemoryStream())
                             {
-                                AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
-                                extData = asset?.Data;
+                                gz.CopyTo(ms);
+                                extData = ms.ToArray();
                             }
-                            #pragma warning restore SYSLIB0011
                         }
                         else
                         {
-                            extData = fileBytes;
+                            byte[] fileBytes = File.ReadAllBytes(matchedFilePath);
+                            // Check if it is Flotsam BinaryFormatter serialized cache file
+                            bool isFlotsam = false;
+                            if (fileBytes.Length > 9 && fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && fileBytes[4] == 0x00 && fileBytes[5] == 0xff && fileBytes[6] == 0xff && fileBytes[7] == 0xff && fileBytes[8] == 0xff)
+                            {
+                                isFlotsam = true;
+                            }
+
+                            if (isFlotsam)
+                            {
+                                #pragma warning disable SYSLIB0011
+                                using (MemoryStream ms = new MemoryStream(fileBytes))
+                                {
+                                    AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
+                                    extData = asset?.Data;
+                                }
+                                #pragma warning restore SYSLIB0011
+                            }
+                            else
+                            {
+                                extData = fileBytes;
+                            }
                         }
                     }
 
@@ -1090,6 +1117,88 @@ namespace OpenSim.Services.AdvancedAssetService
 
             m_PackManager.ClearCommandProgress("scan-inventory");
             MainConsole.Instance.Output(string.Format("Errors during Import:    {0}", errorCount));
+        }
+
+        private byte[] FetchAssetFromUrl(string baseUrl, string assetId, ref sbyte type, ref string name)
+        {
+            string cleanUrl = baseUrl.TrimEnd('/');
+            
+            // 1. Try standard OpenSim/Robust REST GET request to get AssetBase object
+            // This is preferred because it restores original metadata (type, name) from the server
+            try
+            {
+                string assetUrl = cleanUrl + "/assets/" + assetId;
+                AssetBase asset = SynchronousRestObjectRequester.MakeGetRequest<AssetBase>(assetUrl, 10000, null);
+                if (asset != null && asset.Data != null && asset.Data.Length > 0)
+                {
+                    type = asset.Type;
+                    name = asset.Name;
+                    return asset.Data;
+                }
+            }
+            catch
+            {
+                // Fallback to other retrieval methods
+            }
+
+            // 2. Try fetching raw data from <baseUrl>/assets/<assetId>/data
+            try
+            {
+                string rawDataUrl = cleanUrl + "/assets/" + assetId + "/data";
+                byte[] rawData = DownloadRawBytes(rawDataUrl);
+                if (rawData != null && rawData.Length > 0)
+                {
+                    return rawData;
+                }
+            }
+            catch
+            {
+            }
+
+            // 3. Try fetching raw data from <baseUrl>/<assetId>
+            try
+            {
+                string directUrl = cleanUrl + "/" + assetId;
+                byte[] rawData = DownloadRawBytes(directUrl);
+                if (rawData != null && rawData.Length > 0)
+                {
+                    return rawData;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private byte[] DownloadRawBytes(string url)
+        {
+            try
+            {
+                System.Net.HttpWebRequest request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+                request.Method = "GET";
+                request.Timeout = 10000; // 10 seconds timeout
+                request.UserAgent = "OpenSim AdvancedAssetService Importer";
+                
+                using (System.Net.HttpWebResponse response = (System.Net.HttpWebResponse)request.GetResponse())
+                {
+                    if (response.StatusCode == System.Net.HttpStatusCode.OK)
+                    {
+                        using (Stream stream = response.GetResponseStream())
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            stream.CopyTo(ms);
+                            return ms.ToArray();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore and let caller handle fallback
+            }
+            return null;
         }
 
         private void HandleDefragment(string module, string[] args)
@@ -2086,7 +2195,207 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void HandleVerify(string module, string[] args)
         {
-            m_PackManager.VerifyIntegrity(msg => MainConsole.Instance.Output(msg));
+            // 1. Physical database and pack files integrity check
+            MainConsole.Instance.Output("==================================================================");
+            MainConsole.Instance.Output("PHASE 1: RUNNING PHYSICAL DATABASE AND PACKFILES INTEGRITY CHECK");
+            MainConsole.Instance.Output("==================================================================");
+            try
+            {
+                m_PackManager.VerifyIntegrity(msg => MainConsole.Instance.Output(msg));
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error during physical integrity check: " + ex.Message);
+            }
+
+            MainConsole.Instance.Output(string.Empty);
+
+            // 2. Inventory consistency check
+            MainConsole.Instance.Output("==================================================================");
+            MainConsole.Instance.Output("PHASE 2: RUNNING INVENTORY-TO-ASSETS CONSISTENCY CHECK");
+            MainConsole.Instance.Output("==================================================================");
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("Database provider or connection string not configured in AdvancedAssetService.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Loading inventory database...");
+            IXInventoryData invDatabase;
+            try
+            {
+                invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to load inventory database: " + ex.Message);
+                return;
+            }
+
+            if (invDatabase == null)
+            {
+                MainConsole.Instance.Output("Failed to instantiate inventory database plugin.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Querying inventory items from database...");
+            XInventoryItem[] items;
+            try
+            {
+                items = invDatabase.GetItems(new string[0], new string[0]);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to query inventory items: " + ex.Message);
+                return;
+            }
+
+            if (items == null || items.Length == 0)
+            {
+                MainConsole.Instance.Output("No items found in inventory database.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Checking asset existence in Advanced Asset Service...");
+
+            HashSet<UUID> inventoryAssetIDs = new HashSet<UUID>();
+            foreach (var item in items)
+            {
+                if (item.assetID != UUID.Zero)
+                {
+                    inventoryAssetIDs.Add(item.assetID);
+                }
+            }
+
+            int totalUnique = inventoryAssetIDs.Count;
+            int presentCount = 0;
+            int missingCount = 0;
+
+            foreach (UUID assetID in inventoryAssetIDs)
+            {
+                if (m_PackManager.AssetExists(assetID.ToString()))
+                {
+                    presentCount++;
+                }
+                else
+                {
+                    missingCount++;
+                }
+            }
+
+            MainConsole.Instance.Output(string.Empty);
+            if (missingCount > 0)
+            {
+                MainConsole.Instance.Output("==================================================================");
+                MainConsole.Instance.Output("INVENTORY VERIFICATION COMPLETED WITH DISCREPANCIES!");
+                MainConsole.Instance.Output("==================================================================");
+                MainConsole.Instance.Output(string.Format("Total unique assets referenced in inventory: {0}", totalUnique));
+                MainConsole.Instance.Output(string.Format("Total assets present in Advanced Asset:      {0}", presentCount));
+                MainConsole.Instance.Output(string.Format("Total assets MISSING in Advanced Asset:      {0}", missingCount));
+                MainConsole.Instance.Output("------------------------------------------------------------------");
+                MainConsole.Instance.Output("[GUIDANCE] How to restore missing assets:");
+                MainConsole.Instance.Output("1. If you have backup folders (old FSAsset, region cache, etc.), run:");
+                MainConsole.Instance.Output("   aas scan-inventory <path_to_backup_folder>");
+                MainConsole.Instance.Output("2. If you have an active asset server or web repository, run:");
+                MainConsole.Instance.Output("   aas scan-inventory <asset_server_url>");
+                MainConsole.Instance.Output("==================================================================");
+            }
+            else
+            {
+                MainConsole.Instance.Output("==================================================================");
+                MainConsole.Instance.Output("INVENTORY VERIFICATION COMPLETED SUCCESSFULLY!");
+                MainConsole.Instance.Output("==================================================================");
+                MainConsole.Instance.Output(string.Format("Total unique assets referenced in inventory: {0}", totalUnique));
+                MainConsole.Instance.Output(string.Format("Total assets present in Advanced Asset:      {0}", presentCount));
+                MainConsole.Instance.Output(string.Format("Total assets MISSING in Advanced Asset:      {0}", missingCount));
+                MainConsole.Instance.Output("------------------------------------------------------------------");
+                MainConsole.Instance.Output("All inventory assets are fully accounted for in Advanced Asset Service.");
+                MainConsole.Instance.Output("No further action is required.");
+                MainConsole.Instance.Output("==================================================================");
+            }
+        }
+
+        private void HandleStatus(string module, string[] args)
+        {
+            MainConsole.Instance.Output("==================================================================");
+            MainConsole.Instance.Output("ADVANCED ASSET SERVICE - STATUS AND METRICS");
+            MainConsole.Instance.Output("==================================================================");
+
+            // 1. Get statistics from PackFileManager
+            var stats = m_PackManager.GetStats();
+            
+            MainConsole.Instance.Output("PHYSICAL STORAGE:");
+            MainConsole.Instance.Output(string.Format("  Storage Directory:      {0}", stats["BasePath"]));
+            MainConsole.Instance.Output(string.Format("  SQLite Index File:      {0}", stats["IndexFile"]));
+            MainConsole.Instance.Output(string.Format("  SQLite Index Size:      {0:F2} MB ({1} bytes)", (long)stats["IndexFileSize"] / 1024.0 / 1024.0, stats["IndexFileSize"]));
+            MainConsole.Instance.Output(string.Format("  Total PackFiles (.bin): {0} files", stats["PackFilesCount"]));
+            MainConsole.Instance.Output(string.Format("  Total PackFiles Size:   {0:F2} MB ({1} bytes)", (long)stats["PackFilesTotalSize"] / 1024.0 / 1024.0, stats["PackFilesTotalSize"]));
+            MainConsole.Instance.Output("------------------------------------------------------------------");
+
+            MainConsole.Instance.Output("ASSET METRICS:");
+            MainConsole.Instance.Output(string.Format("  Total Unique Assets (links):     {0}", stats["TotalUniqueAssets"]));
+            MainConsole.Instance.Output(string.Format("  Total Unique Data Blocks (dedup): {0}", stats["TotalUniqueDataBlocks"]));
+            
+            // Calculate deduplication ratio
+            long totalAssets = (long)stats["TotalUniqueAssets"];
+            long uniqueData = (long)stats["TotalUniqueDataBlocks"];
+            if (totalAssets > 0 && uniqueData > 0)
+            {
+                double ratio = (double)totalAssets / uniqueData;
+                double savingsPercent = (1.0 - (double)uniqueData / totalAssets) * 100.0;
+                MainConsole.Instance.Output(string.Format("  Deduplication Ratio:             {0:F2}x (Saved {1:F1}% space)", ratio, savingsPercent));
+            }
+            
+            MainConsole.Instance.Output(string.Format("  Suspicious Assets Flagged:       {0}", stats["TotalSuspiciousAssets"]));
+            MainConsole.Instance.Output(string.Format("  Unsynced Assets (pending sync):  {0}", stats["TotalUnsyncedAssets"]));
+            MainConsole.Instance.Output("------------------------------------------------------------------");
+
+            // 2. Get inventory database statistics
+            MainConsole.Instance.Output("INVENTORY DATABASE METRICS:");
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("  [Not Configured] Inventory database provider or connection string not set.");
+            }
+            else
+            {
+                try
+                {
+                    IXInventoryData invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+                    if (invDatabase != null)
+                    {
+                        XInventoryItem[] items = invDatabase.GetItems(new string[0], new string[0]);
+                        if (items != null)
+                        {
+                            HashSet<UUID> uniqueInvAssets = new HashSet<UUID>();
+                            int totalItems = items.Length;
+                            foreach (var item in items)
+                            {
+                                if (item.assetID != UUID.Zero)
+                                {
+                                    uniqueInvAssets.Add(item.assetID);
+                                }
+                            }
+                            MainConsole.Instance.Output(string.Format("  Total Inventory Items:           {0}", totalItems));
+                            MainConsole.Instance.Output(string.Format("  Unique Assets in Inventory:      {0}", uniqueInvAssets.Count));
+                        }
+                        else
+                        {
+                            MainConsole.Instance.Output("  Failed to retrieve inventory items.");
+                        }
+                    }
+                    else
+                    {
+                        MainConsole.Instance.Output("  Failed to load inventory database plugin.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output("  Error querying inventory database: " + ex.Message);
+                }
+            }
+
+            MainConsole.Instance.Output("==================================================================");
         }
 
         private void HandleRebuildIndex(string module, string[] args)
