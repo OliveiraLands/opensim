@@ -67,32 +67,32 @@
   <ItemGroup>
     <Reference Include="log4net" >
       <Name>log4net</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\log4net.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="Nini" >
-      <Name>Nini</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\Nini.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="OpenMetaverse" >
-      <Name>OpenMetaverse</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\OpenMetaverse.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="OpenMetaverseTypes" >
-      <Name>OpenMetaverseTypes</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\OpenMetaverseTypes.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="System.Data.SQLite" >
-      <Name>System.Data.SQLite</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\System.Data.SQLite.dll</HintPath>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\log4net.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="MySql.Data" >
       <Name>MySql.Data</Name>
-      <HintPath>C:\Home\dev\OliveiraLands\opensim\bin\MySql.Data.dll</HintPath>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\MySql.Data.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Nini" >
+      <Name>Nini</Name>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\Nini.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="OpenMetaverse" >
+      <Name>OpenMetaverse</Name>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\OpenMetaverse.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="OpenMetaverseTypes" >
+      <Name>OpenMetaverseTypes</Name>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\OpenMetaverseTypes.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Data.SQLite" >
+      <Name>System.Data.SQLite</Name>
+      <HintPath>C:\Home\Dev\oliveiralands\opensim\bin\System.Data.SQLite.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>

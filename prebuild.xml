@@ -624,6 +624,7 @@
       <Reference name="OpenSim.Services.Connectors"/>
       <Reference name="OpenSim.Data"/>
       <Reference name="System.Data.SQLite"/>
+      <Reference name="MySql.Data"/>
       <Reference name="Nini"/>
       <Reference name="log4net"/>
       <PackageReference name="AWSSDK.S3" version="3.7.307.21"/>

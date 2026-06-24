@@ -122,7 +122,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
-            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask>", "Scan inventories and region databases to identify used assets, marking unused ones as suspicious", HandleScanUsedAssets);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask> [<import_folder>] [--flag-suspicious]", "Scan inventories and region databases to identify used assets, importing missing ones and optionally flagging unused ones as suspicious", HandleScanUsedAssets);
         }
 
         public virtual AssetBase Get(string id)
@@ -697,7 +697,6 @@ namespace OpenSim.Services.AdvancedAssetService
                     continue;
                 }
 
-                sbyte type = (sbyte)AssetType.Unknown;
                 string assetID = filename;
 
                 if (filename.Contains("."))
@@ -1117,11 +1116,29 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             if (args.Length < 3)
             {
-                MainConsole.Instance.Output("Usage: aas scan-used-assets <db_mask> (e.g. 'os_%')");
+                MainConsole.Instance.Output("Usage: aas scan-used-assets <db_mask> [<import_folder>] [--flag-suspicious] (e.g. 'os_%')");
                 return;
             }
 
             string dbMask = args[2];
+            string importFolder = null;
+            bool flagSuspicious = false;
+
+            for (int i = 3; i < args.Length; i++)
+            {
+                if (args[i].Equals("--flag-suspicious", StringComparison.OrdinalIgnoreCase) || args[i].Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    flagSuspicious = true;
+                }
+                else if (args[i].Equals("--no-flag-suspicious", StringComparison.OrdinalIgnoreCase) || args[i].Equals("false", StringComparison.OrdinalIgnoreCase))
+                {
+                    flagSuspicious = false;
+                }
+                else
+                {
+                    importFolder = args[i];
+                }
+            }
 
             if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
             {
@@ -1237,7 +1254,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                         {
                                             while (reader.Read())
                                             {
-                                                string rawId = reader.GetString(0);
+                                                string rawId = reader.GetValue(0)?.ToString();
                                                 if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
                                                 {
                                                     string nid = uuid.ToString().ToLower().Replace("-", "");
@@ -1334,7 +1351,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                             {
                                                 while (reader.Read())
                                                 {
-                                                    string rawId = reader.GetString(0);
+                                                    string rawId = reader.GetValue(0)?.ToString();
                                                     if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
                                                     {
                                                         string nid = uuid.ToString().ToLower().Replace("-", "");
@@ -1380,7 +1397,7 @@ namespace OpenSim.Services.AdvancedAssetService
                                             {
                                                 while (reader.Read())
                                                 {
-                                                    string rawId = reader.GetString(0);
+                                                    string rawId = reader.GetValue(0)?.ToString();
                                                     if (UUID.TryParse(rawId, out UUID uuid) && uuid != UUID.Zero)
                                                     {
                                                         string nid = uuid.ToString().ToLower().Replace("-", "");
@@ -1415,6 +1432,72 @@ namespace OpenSim.Services.AdvancedAssetService
             else
             {
                 MainConsole.Instance.Output("Database provider is not MySQL/MariaDB. Database matching skipped.");
+            }
+
+            if (!string.IsNullOrEmpty(importFolder))
+            {
+                if (!Directory.Exists(importFolder))
+                {
+                    MainConsole.Instance.Output("Import folder not found: " + importFolder);
+                }
+                else
+                {
+                    MainConsole.Instance.Output("Scanning import folder recursively for missing used assets...");
+                    Dictionary<string, string> importableFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        foreach (string file in Directory.EnumerateFiles(importFolder, "*", SearchOption.AllDirectories))
+                        {
+                            string filename = Path.GetFileName(file);
+                            if (filename == "index.db" || (filename.StartsWith("pack_") && filename.EndsWith(".bin")))
+                                continue;
+
+                            string key = Path.GetFileNameWithoutExtension(filename).ToLower().Replace("-", "");
+                            if (key.Contains("."))
+                            {
+                                key = key.Split('.')[0];
+                            }
+                            importableFiles[key] = file;
+                        }
+                        MainConsole.Instance.Output(string.Format("Found {0} files in import folder.", importableFiles.Count));
+                    }
+                    catch (Exception ex)
+                    {
+                        MainConsole.Instance.Output("Error scanning import folder: " + ex.Message);
+                    }
+
+                    int importSuccess = 0;
+                    int importFailed = 0;
+
+                    foreach (var nid in usedUuids)
+                    {
+                        if (!m_PackManager.AssetExists(nid))
+                        {
+                            if (importableFiles.TryGetValue(nid, out string filePath))
+                            {
+                                string formattedUuid = new UUID(nid).ToString();
+                                if (TryImportAssetFromFile(filePath, formattedUuid, out string error))
+                                {
+                                    importSuccess++;
+                                }
+                                else
+                                {
+                                    importFailed++;
+                                    m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Failed to import missing used asset {0} from {1}: {2}", formattedUuid, filePath, error);
+                                }
+                            }
+                        }
+                    }
+
+                    if (importSuccess > 0 || importFailed > 0)
+                    {
+                        MainConsole.Instance.Output(string.Format("Import completed: {0} assets imported, {1} failed.", importSuccess, importFailed));
+                    }
+                    else
+                    {
+                        MainConsole.Instance.Output("No missing used assets were found in the import folder.");
+                    }
+                }
             }
 
             // Write to SQLite base of used assets
@@ -1483,23 +1566,29 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Output(string.Format("  Present in AAS:           {0}", foundInAas));
             MainConsole.Instance.Output(string.Format("  Missing in AAS:           {0}", missingInAas));
 
-            // Mark unused ones in AAS as suspicious
-            MainConsole.Instance.Output("Identifying unused assets in AAS to flag as suspicious...");
-            List<AssetMetadataRecord> allAasAssets = m_PackManager.GetAllAssets();
-            List<string> unusedUuids = new List<string>();
-
-            foreach (var meta in allAasAssets)
+            // Mark unused ones in AAS as suspicious if requested
+            if (flagSuspicious)
             {
-                if (!usedUuids.Contains(meta.UUID))
+                MainConsole.Instance.Output("Identifying unused assets in AAS to flag as suspicious...");
+                List<AssetMetadataRecord> allAasAssets = m_PackManager.GetAllAssets();
+                List<string> unusedUuids = new List<string>();
+
+                foreach (var meta in allAasAssets)
                 {
-                    unusedUuids.Add(meta.UUID);
+                    if (!usedUuids.Contains(meta.UUID))
+                    {
+                        unusedUuids.Add(meta.UUID);
+                    }
                 }
+
+                MainConsole.Instance.Output(string.Format("Found {0} unused assets in AAS. Flagging them as suspicious...", unusedUuids.Count));
+                m_PackManager.SetSuspiciousAssets(unusedUuids);
+                MainConsole.Instance.Output("Scan completed successfully. Unused assets flagged as suspicious and will be cleaned up in the next defrag run.");
             }
-
-            MainConsole.Instance.Output(string.Format("Found {0} unused assets in AAS. Flagging them as suspicious...", unusedUuids.Count));
-            m_PackManager.SetSuspiciousAssets(unusedUuids);
-
-            MainConsole.Instance.Output("Scan completed successfully. Flagged assets can be deleted in the next defrag/pack.");
+            else
+            {
+                MainConsole.Instance.Output("Scan completed successfully. Flagging unused assets as suspicious is disabled (use '--flag-suspicious' or 'true' to enable).");
+            }
         }
 
         private void HandleAuditGrid(string module, string[] args)
@@ -2116,6 +2205,100 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
             }
             return files;
+        }
+
+        private bool TryImportAssetFromFile(string filePath, string uuidStr, out string error)
+        {
+            error = string.Empty;
+            try
+            {
+                string filename = Path.GetFileName(filePath);
+                string ext = Path.GetExtension(filePath).ToLower();
+                sbyte type = (sbyte)AssetType.Unknown;
+                string name = "Imported " + uuidStr;
+
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(filePath);
+                if (nameWithoutExt.Contains("."))
+                {
+                    string[] parts = nameWithoutExt.Split('.');
+                    if (parts.Length > 1 && sbyte.TryParse(parts[1], out sbyte t))
+                    {
+                        type = t;
+                    }
+                }
+
+                byte[] data = null;
+
+                if (ext == ".gz")
+                {
+                    using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        gz.CopyTo(ms);
+                        data = ms.ToArray();
+                    }
+                }
+                else
+                {
+                    byte[] fileBytes = File.ReadAllBytes(filePath);
+                    bool isFlotsam = fileBytes.Length > 9 && 
+                                     fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && 
+                                     fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && 
+                                     fileBytes[4] == 0x00 && fileBytes[5] == 0xff && 
+                                     fileBytes[6] == 0xff && fileBytes[7] == 0xff && 
+                                     fileBytes[8] == 0xff;
+
+                    if (isFlotsam)
+                    {
+#pragma warning disable SYSLIB0011
+                        var bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+                        using (MemoryStream ms = new MemoryStream(fileBytes))
+                        {
+                            AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
+                            if (asset != null)
+                            {
+                                Store(asset);
+                                return true;
+                            }
+                        }
+#pragma warning restore SYSLIB0011
+                    }
+                    else
+                    {
+                        data = fileBytes;
+                    }
+                }
+
+                if (data == null || data.Length == 0)
+                {
+                    error = "Empty or invalid data";
+                    return false;
+                }
+
+                if (m_GridConnector != null)
+                {
+                    try
+                    {
+                        string existingHash;
+                        AssetMetadata dbMeta = m_GridConnector.Get(uuidStr, out existingHash);
+                        if (dbMeta != null)
+                        {
+                            type = dbMeta.Type;
+                            name = dbMeta.Name;
+                        }
+                    }
+                    catch {}
+                }
+
+                m_PackManager.StoreAssetData(uuidStr, data, type, name);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
 
         public void Dispose()
