@@ -12,11 +12,23 @@ using OpenMetaverse;
 using log4net;
 using System.Reflection;
 using OpenSim.Data;
+using System.IO.MemoryMappedFiles;
 
 namespace OpenSim.Services.AdvancedAssetService
 {
     public class PackFileIndexEntry { public string Hash; public long Offset; public int Length; public int PackFileID; }
     public class AssetMetadataRecord { public string UUID; public string Hash; public sbyte Type; public string Name; public long Created; public bool Synced; }
+    
+    public class CachedAssetInfo
+    {
+        public string Hash;
+        public sbyte Type;
+        public string Name;
+        public long Created;
+        public int PackFileID;
+        public long Offset;
+        public int Length;
+    }
     
     public class AssetWriteOp
     {
@@ -62,6 +74,8 @@ namespace OpenSim.Services.AdvancedAssetService
         private ConcurrentDictionary<string, PackFileIndexEntry> m_InFlightHashes = new ConcurrentDictionary<string, PackFileIndexEntry>();
         private Task m_WriteTask;
         private object m_StoreLock = new object();
+        private readonly ConcurrentDictionary<string, CachedAssetInfo> m_L1Cache = new ConcurrentDictionary<string, CachedAssetInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<int, MemoryMappedFile> m_MappedPacks = new ConcurrentDictionary<int, MemoryMappedFile>();
 
         public PackFileManager(string basePath)
         {
@@ -287,6 +301,102 @@ namespace OpenSim.Services.AdvancedAssetService
             return results;
         }
 
+        private byte[] ReadAssetDataBytes(int packFileID, long offset, int length, string expectedHash, bool verifyOnRead)
+        {
+            string packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packFileID));
+            
+            // If it's the active (unsealed) pack file, use standard FileStream to avoid boundary issues with growing size.
+            // Otherwise, use Memory-Mapped Files for maximum concurrency and zero-copy read performance.
+            bool useMMF = packFileID < CurrentPackID;
+            
+            if (useMMF)
+            {
+                try
+                {
+                    var mmf = m_MappedPacks.GetOrAdd(packFileID, pid => 
+                    {
+                        return MemoryMappedFile.CreateFromFile(packPath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+                    });
+                    
+                    long mapSize = length + 1024;
+                    FileInfo fi = new FileInfo(packPath);
+                    if (fi.Exists)
+                    {
+                        long fileLen = fi.Length;
+                        if (offset + mapSize > fileLen)
+                        {
+                            mapSize = fileLen - offset;
+                        }
+                    }
+                    
+                    using (var accessor = mmf.CreateViewAccessor(offset, mapSize, MemoryMappedFileAccess.Read))
+                    {
+                        if (accessor.ReadUInt32(0) != MAGIC_NUMBER) return null;
+                        ushort version = accessor.ReadUInt16(4);
+                        
+                        long headerOffset = 4 + 2 + 16 + 1; // Magic + Version + UUID + Type
+                        if (version >= 2) headerOffset += 8; // Created
+                        
+                        ushort nameLen = accessor.ReadUInt16(headerOffset);
+                        headerOffset += 2 + nameLen; // Name bytes
+                        
+                        int dataLen = accessor.ReadInt32(headerOffset);
+                        headerOffset += 4;
+                        
+                        byte[] data = new byte[dataLen];
+                        accessor.ReadArray(headerOffset, data, 0, dataLen);
+                        
+                        if (verifyOnRead && expectedHash != null)
+                        {
+                            string computedHash = ComputeHash(data);
+                            if (computedHash != expectedHash)
+                            {
+                                m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Corruption detected in asset! Hash mismatch (MMF): expected {0}, got {1}", expectedHash, computedHash));
+                                return null;
+                            }
+                        }
+                        return data;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    m_log.Debug($"[ADVANCED ASSET SERVICE]: MMF read failed for pack {packFileID}, falling back to FileStream. Error: {ex.Message}");
+                }
+            }
+            
+            try
+            {
+                using (FileStream fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (BinaryReader br = new BinaryReader(fs))
+                {
+                    fs.Seek(offset, SeekOrigin.Begin);
+                    if (br.ReadUInt32() != MAGIC_NUMBER) return null;
+                    ushort version = br.ReadUInt16();
+                    br.ReadBytes(16); // UUID
+                    br.ReadSByte(); // Type
+                    
+                    if (version >= 2) br.ReadInt64();
+                    
+                    ushort nameLen = br.ReadUInt16();
+                    br.ReadBytes(nameLen);
+                    int dataLen = br.ReadInt32();
+                    byte[] data = br.ReadBytes(dataLen);
+                    
+                    if (verifyOnRead && expectedHash != null)
+                    {
+                        string computedHash = ComputeHash(data);
+                        if (computedHash != expectedHash)
+                        {
+                            m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Corruption detected in asset! Hash mismatch (Stream): expected {0}, got {1}", expectedHash, computedHash));
+                            return null;
+                        }
+                    }
+                    return data;
+                }
+            }
+            catch { return null; }
+        }
+
         public byte[] GetAssetData(string uuid, out sbyte type, out string name, bool verifyOnRead = false)
         {
             type = 0; name = string.Empty;
@@ -299,52 +409,81 @@ namespace OpenSim.Services.AdvancedAssetService
                 return op.Data;
             }
 
-            AssetMetadataRecord meta;
-            PackFileIndexEntry entry;
-
-            lock (m_Lock)
+            if (m_L1Cache.TryGetValue(nid, out CachedAssetInfo cached))
             {
-                meta = GetMetadata(nid);
-                if (meta == null) return null;
-                type = meta.Type; name = meta.Name;
-                entry = GetIndexEntry(meta.Hash);
+                type = cached.Type;
+                name = cached.Name;
+                byte[] data = ReadAssetDataBytes(cached.PackFileID, cached.Offset, cached.Length, cached.Hash, verifyOnRead);
+                if (data != null)
+                {
+                    ClearSuspiciousStatus(nid);
+                    return data;
+                }
+                m_L1Cache.TryRemove(nid, out _);
             }
 
-            if (entry == null) return null;
-
-            string packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", entry.PackFileID));
-            try
+            CachedAssetInfo dbInfo = null;
+            lock (m_Lock)
             {
-                using (FileStream fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (BinaryReader br = new BinaryReader(fs))
+                using (var cmd = m_Connection.CreateCommand())
                 {
-                    fs.Seek(entry.Offset, SeekOrigin.Begin);
-                    if (br.ReadUInt32() != MAGIC_NUMBER) return null;
-                    ushort version = br.ReadUInt16();
-                    br.ReadBytes(16); // UUID
-                    br.ReadSByte(); // Type
-                    
-                    if (version >= 2) br.ReadInt64(); // Skip CreationDate in reader for now
-                    
-                    ushort nameLen = br.ReadUInt16();
-                    br.ReadBytes(nameLen); // Skip Name
-                    int dataLen = br.ReadInt32();
-                    byte[] data = br.ReadBytes(dataLen);
-                    
-                    if (verifyOnRead)
+                    cmd.CommandText = "SELECT am.hash, am.type, am.name, am.created, am.synced, ia.pack_id, ia.offset, ia.length " +
+                                     "FROM asset_map am LEFT JOIN index_assets ia ON am.hash = ia.hash " +
+                                     "WHERE am.uuid = :uuid LIMIT 1";
+                    cmd.Parameters.AddWithValue(":uuid", nid);
+                    using (var reader = cmd.ExecuteReader())
                     {
-                        string computedHash = ComputeHash(data);
-                        if (computedHash != meta.Hash)
+                        if (reader.Read())
                         {
-                            m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Corruption detected in asset {0}! Hash mismatch: expected {1}, got {2}", uuid, meta.Hash, computedHash));
-                            return null;
+                            string hash = reader.GetString(0);
+                            sbyte assetType = (sbyte)reader.GetInt32(1);
+                            string assetName = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                            long created = reader.GetInt64(3);
+                            
+                            if (!reader.IsDBNull(5))
+                            {
+                                dbInfo = new CachedAssetInfo
+                                {
+                                    Hash = hash,
+                                    Type = assetType,
+                                    Name = assetName,
+                                    Created = created,
+                                    PackFileID = reader.GetInt32(5),
+                                    Offset = reader.GetInt64(6),
+                                    Length = reader.GetInt32(7)
+                                };
+                                m_L1Cache[nid] = dbInfo;
+                                m_InFlightHashes[hash] = new PackFileIndexEntry
+                                {
+                                    Hash = hash,
+                                    PackFileID = dbInfo.PackFileID,
+                                    Offset = dbInfo.Offset,
+                                    Length = dbInfo.Length
+                                };
+                            }
+                            else
+                            {
+                                type = assetType;
+                                name = assetName;
+                            }
                         }
                     }
+                }
+            }
+
+            if (dbInfo != null)
+            {
+                type = dbInfo.Type;
+                name = dbInfo.Name;
+                byte[] data = ReadAssetDataBytes(dbInfo.PackFileID, dbInfo.Offset, dbInfo.Length, dbInfo.Hash, verifyOnRead);
+                if (data != null)
+                {
                     ClearSuspiciousStatus(nid);
                     return data;
                 }
             }
-            catch { return null; }
+
+            return null;
         }
 
         public string StoreAssetData(string uuid, byte[] data, sbyte type, string name)
@@ -494,6 +633,17 @@ namespace OpenSim.Services.AdvancedAssetService
                                 {
                                     m_PendingWritesCache.TryRemove(nid, out _);
                                 }
+                                var info = new CachedAssetInfo
+                                {
+                                    Hash = hash,
+                                    Type = op.Type,
+                                    Name = op.Name,
+                                    Created = op.Created,
+                                    PackFileID = entry.PackFileID,
+                                    Offset = entry.Offset,
+                                    Length = entry.Length
+                                };
+                                m_L1Cache[nid] = info;
                                 op.Tcs.SetResult(currentHash);
                             },
                             () => {
@@ -623,6 +773,7 @@ namespace OpenSim.Services.AdvancedAssetService
             lock (m_Lock)
             {
                 FlushBatch();
+                m_L1Cache.Clear();
                 m_log.Info("[ADVANCED ASSET SERVICE]: Rebuilding index...");
                 string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
                 Array.Sort(files);
@@ -825,6 +976,11 @@ namespace OpenSim.Services.AdvancedAssetService
             }
             FlushBatch();
             if (m_Connection != null) { m_Connection.Close(); m_Connection.Dispose(); m_Connection = null; }
+            foreach (var mmf in m_MappedPacks.Values)
+            {
+                try { mmf.Dispose(); } catch { }
+            }
+            m_MappedPacks.Clear();
         }
 
         public void BackupDatabase(string destinationPath)
@@ -1545,6 +1701,12 @@ namespace OpenSim.Services.AdvancedAssetService
                 {
                     foreach (var fs in openSourcePacks.Values) fs.Dispose();
                     try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch {}
+                    m_L1Cache.Clear();
+                    foreach (var mmf in m_MappedPacks.Values)
+                    {
+                        try { mmf.Dispose(); } catch { }
+                    }
+                    m_MappedPacks.Clear();
                 }
             }
         }

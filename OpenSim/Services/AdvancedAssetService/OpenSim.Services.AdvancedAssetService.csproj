@@ -119,8 +119,6 @@
     <Compile Include="S3BackgroundReplicator.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="Diagnostics\Program.cs">
-      <SubType>Code</SubType>
-    </Compile>
+
   </ItemGroup>
 </Project>

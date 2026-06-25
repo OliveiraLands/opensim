@@ -118,7 +118,7 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
             using (var service = CreateService())
             {
                 // Let's trigger a verify check
-                service.VerifyIntegrity(msg => Console.WriteLine("AAS: " + msg));
+                service.VerifyIntegrityDiag(msg => Console.WriteLine("AAS: " + msg));
             }
         }
 
@@ -287,7 +287,7 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
 
     public static class AssetServiceExtensions
     {
-        public static void VerifyIntegrity(this AdvancedAssetService service, Action<string> output)
+        public static void VerifyIntegrityDiag(this AdvancedAssetService service, Action<string> output)
         {
             // Use reflection to access PackFileManager and call VerifyIntegrity
             var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", BindingFlags.Instance | BindingFlags.NonPublic);

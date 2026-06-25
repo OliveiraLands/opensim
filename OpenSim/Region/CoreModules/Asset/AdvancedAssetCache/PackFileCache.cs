@@ -11,10 +11,21 @@ using System.Threading.Tasks;
 using OpenMetaverse;
 using log4net;
 using System.Reflection;
+using System.IO.MemoryMappedFiles;
 
 namespace OpenSim.Region.CoreModules.Asset
 {
     public class PackCacheEntry { public string Hash; public long Offset; public int Length; public int PackFileID; }
+    
+    public class CachedAssetInfo
+    {
+        public string Hash;
+        public sbyte Type;
+        public string Name;
+        public int PackFileID;
+        public long Offset;
+        public int Length;
+    }
 
     public class PendingUpdate
     {
@@ -43,6 +54,8 @@ namespace OpenSim.Region.CoreModules.Asset
         private long m_MaxPackSize;
         private long m_MaxCacheSize;
         private object m_Lock = new object();
+        private readonly ConcurrentDictionary<string, CachedAssetInfo> m_L1Cache = new ConcurrentDictionary<string, CachedAssetInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<int, MemoryMappedFile> m_MappedPacks = new ConcurrentDictionary<int, MemoryMappedFile>();
         
         private Timer m_BatchTimer;
         private ConcurrentQueue<PendingUpdate> m_PendingUpdates = new ConcurrentQueue<PendingUpdate>();
@@ -110,8 +123,31 @@ namespace OpenSim.Region.CoreModules.Asset
                     name = pending.Name;
                     return pending.Data;
                 }
+            }
 
-                PackCacheEntry entry = null;
+            if (m_L1Cache.TryGetValue(nid, out CachedAssetInfo cached))
+            {
+                type = cached.Type;
+                name = cached.Name;
+                byte[] data = ReadFromPackBytes(cached.PackFileID, cached.Offset, cached.Length);
+                if (data != null)
+                {
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    QueueUpdate(cmd => {
+                        cmd.CommandText = "UPDATE asset_map SET last_access = ? WHERE uuid = ?";
+                        cmd.Parameters.Clear();
+                        cmd.Parameters.AddWithValue(null, now);
+                        cmd.Parameters.AddWithValue(null, nid);
+                        cmd.ExecuteNonQuery();
+                    });
+                    return data;
+                }
+                m_L1Cache.TryRemove(nid, out _);
+            }
+
+            CachedAssetInfo dbInfo = null;
+            lock (m_Lock)
+            {
                 using (var cmd = m_Connection.CreateCommand())
                 {
                     cmd.CommandText = "SELECT m.hash, m.type, m.name, i.pack_id, i.offset, i.length " +
@@ -122,21 +158,25 @@ namespace OpenSim.Region.CoreModules.Asset
                     {
                         if (reader.Read())
                         {
-                            entry = new PackCacheEntry {
+                            dbInfo = new CachedAssetInfo {
                                 Hash = reader.GetString(0),
+                                Type = (sbyte)reader.GetInt32(1),
+                                Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
                                 PackFileID = reader.GetInt32(3),
                                 Offset = reader.GetInt64(4),
                                 Length = reader.GetInt32(5)
                             };
-                            type = (sbyte)reader.GetInt32(1);
-                            name = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                            m_L1Cache[nid] = dbInfo;
                         }
                     }
                 }
+            }
 
-                if (entry == null) return null;
-
-                // Update last access time (queued)
+            if (dbInfo != null)
+            {
+                type = dbInfo.Type;
+                name = dbInfo.Name;
+                
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 QueueUpdate(cmd => {
                     cmd.CommandText = "UPDATE asset_map SET last_access = ? WHERE uuid = ?";
@@ -146,15 +186,17 @@ namespace OpenSim.Region.CoreModules.Asset
                     cmd.ExecuteNonQuery();
                 });
 
-                byte[] data = ReadFromPack(entry);
+                byte[] data = ReadFromPackBytes(dbInfo.PackFileID, dbInfo.Offset, dbInfo.Length);
                 if (data == null)
                 {
-                    m_log.WarnFormat("[ADVANCED ASSET CACHE]: Asset {0} read from pack {1} offset {2} failed or is corrupted. Removing metadata to allow re-caching.", uuid, entry.PackFileID, entry.Offset);
-                    RemoveAssetMetadata(nid, entry.Hash);
+                    m_log.WarnFormat("[ADVANCED ASSET CACHE]: Asset {0} read from pack {1} offset {2} failed or is corrupted. Removing metadata to allow re-caching.", uuid, dbInfo.PackFileID, dbInfo.Offset);
+                    RemoveAssetMetadata(nid, dbInfo.Hash);
                     return null;
                 }
                 return data;
             }
+
+            return null;
         }
 
         private void RemoveAssetMetadata(string uuid, string hash)
@@ -177,32 +219,82 @@ namespace OpenSim.Region.CoreModules.Asset
                     cmd.ExecuteNonQuery();
                 }
             });
+            m_L1Cache.TryRemove(uuid, out _);
         }
 
-        private byte[] ReadFromPack(PackCacheEntry entry)
+        private byte[] ReadFromPackBytes(int packFileID, long offset, int length)
         {
-            string packPath = Path.Combine(m_BasePath, string.Format("cache_pack_{0}.bin", entry.PackFileID));
+            string packPath = Path.Combine(m_BasePath, string.Format("cache_pack_{0}.bin", packFileID));
             if (!File.Exists(packPath)) return null;
+
+            bool useMMF = packFileID < m_CurrentPackID;
+            if (useMMF)
+            {
+                try
+                {
+                    var mmf = m_MappedPacks.GetOrAdd(packFileID, pid =>
+                    {
+                        return MemoryMappedFile.CreateFromFile(packPath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+                    });
+
+                    long mapSize = length + 1024;
+                    FileInfo fi = new FileInfo(packPath);
+                    if (fi.Exists)
+                    {
+                        long fileLen = fi.Length;
+                        if (offset + mapSize > fileLen)
+                        {
+                            mapSize = fileLen - offset;
+                        }
+                    }
+
+                    using (var accessor = mmf.CreateViewAccessor(offset, mapSize, MemoryMappedFileAccess.Read))
+                    {
+                        if (accessor.ReadUInt32(0) != MAGIC_NUMBER) return null;
+                        if (accessor.ReadUInt16(4) != VERSION) return null;
+                        
+                        long headerOffset = 4 + 2 + 16 + 1; // Magic + Version + UUID + Type
+                        ushort nameLen = accessor.ReadUInt16(headerOffset);
+                        headerOffset += 2 + nameLen; // Skip Name
+                        
+                        int dataLen = accessor.ReadInt32(headerOffset);
+                        if (dataLen != length) return null;
+                        headerOffset += 4;
+
+                        byte[] data = new byte[dataLen];
+                        accessor.ReadArray(headerOffset, data, 0, dataLen);
+                        return data;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    m_log.Debug($"[ADVANCED ASSET CACHE]: MMF read failed for pack {packFileID}, falling back to FileStream. Error: {ex.Message}");
+                }
+            }
 
             try
             {
                 using (FileStream fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (BinaryReader br = new BinaryReader(fs))
                 {
-                    fs.Seek(entry.Offset, SeekOrigin.Begin);
+                    fs.Seek(offset, SeekOrigin.Begin);
                     if (br.ReadUInt32() != MAGIC_NUMBER) return null;
                     if (br.ReadUInt16() != VERSION) return null;
                     br.ReadBytes(16); // UUID
                     br.ReadSByte(); // Type
                     fs.Seek(br.ReadUInt16(), SeekOrigin.Current); // Skip Name
                     int dataLen = br.ReadInt32();
-                    if (dataLen != entry.Length) return null; // Corrupted length
+                    if (dataLen != length) return null;
                     byte[] data = br.ReadBytes(dataLen);
-                    if (data == null || data.Length != dataLen) return null;
                     return data;
                 }
             }
             catch { return null; }
+        }
+
+        private byte[] ReadFromPack(PackCacheEntry entry)
+        {
+            return ReadFromPackBytes(entry.PackFileID, entry.Offset, entry.Length);
         }
 
         public void Store(string uuid, byte[] data, sbyte type, string name)
@@ -265,6 +357,17 @@ namespace OpenSim.Region.CoreModules.Asset
                     }
                 };
                 m_PendingReads[nid] = pendingNew;
+
+                var info = new CachedAssetInfo
+                {
+                    Hash = hash,
+                    Type = type,
+                    Name = name,
+                    PackFileID = m_CurrentPackID,
+                    Offset = offset,
+                    Length = data.Length
+                };
+                m_L1Cache[nid] = info;
 
                 UpdateIndex(hash, m_CurrentPackID, offset, data.Length);
                 UpdateAssetMap(nid, hash, type, name, now);
@@ -385,6 +488,12 @@ namespace OpenSim.Region.CoreModules.Asset
             ExecuteNonQuery(string.Format("DELETE FROM packs WHERE id = {0}", id));
             // Clean up asset_map entries that no longer have a valid index entry
             ExecuteNonQuery("DELETE FROM asset_map WHERE hash NOT IN (SELECT hash FROM index_assets)");
+            
+            m_L1Cache.Clear();
+            if (m_MappedPacks.TryRemove(id, out var mmf))
+            {
+                try { mmf.Dispose(); } catch {}
+            }
         }
 
         private string ComputeHash(byte[] data)
@@ -450,7 +559,15 @@ namespace OpenSim.Region.CoreModules.Asset
                 FlushBatch();
                 m_Connection.Close();
                 m_Connection.Dispose();
+                m_Connection = null;
                 
+                m_L1Cache.Clear();
+                foreach (var mmf in m_MappedPacks.Values)
+                {
+                    try { mmf.Dispose(); } catch {}
+                }
+                m_MappedPacks.Clear();
+
                 foreach (string file in Directory.GetFiles(m_BasePath, "cache_pack_*.bin")) File.Delete(file);
                 if (File.Exists(m_IndexFile)) File.Delete(m_IndexFile);
                 
@@ -463,6 +580,11 @@ namespace OpenSim.Region.CoreModules.Asset
             m_BatchTimer?.Stop();
             FlushBatch();
             if (m_Connection != null) { m_Connection.Close(); m_Connection.Dispose(); m_Connection = null; }
+            foreach (var mmf in m_MappedPacks.Values)
+            {
+                try { mmf.Dispose(); } catch {}
+            }
+            m_MappedPacks.Clear();
         }
     }
 }
