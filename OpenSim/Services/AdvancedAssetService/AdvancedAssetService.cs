@@ -119,6 +119,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas compare", "aas compare <path>", "Compare local AAS assets with an external asset folder", HandleCompare);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-raw", "aas import-raw <path>", "Bulk import raw uncompressed assets named by UUID", HandleImportRaw);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path|url>", "Scan inventory database and import missing assets from an external folder or asset server URL", HandleScanInventory);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory-iar", "aas scan-inventory-iar <path>", "Scan inventory database and import missing assets from an extracted IAR folder", HandleScanInventoryIar);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas defrag", "aas defrag", "Defragment PackFiles and release dead storage space", HandleDefragment);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
@@ -1117,6 +1118,303 @@ namespace OpenSim.Services.AdvancedAssetService
 
             m_PackManager.ClearCommandProgress("scan-inventory");
             MainConsole.Instance.Output(string.Format("Errors during Import:    {0}", errorCount));
+        }
+
+        private void HandleScanInventoryIar(string module, string[] args)
+        {
+            if (args.Length < 3)
+            {
+                MainConsole.Instance.Output("Syntax: aas scan-inventory-iar <path>");
+                return;
+            }
+            string path = args[2];
+
+            if (!Directory.Exists(path))
+            {
+                MainConsole.Instance.Output("Directory not found: " + path);
+                return;
+            }
+
+            string assetsPath = Path.Combine(path, "assets");
+            if (!Directory.Exists(assetsPath))
+            {
+                assetsPath = path;
+            }
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("Database provider or connection string not configured.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Loading inventory database plugin...");
+            IXInventoryData invDatabase;
+            try
+            {
+                invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to load inventory database: " + ex.Message);
+                return;
+            }
+
+            if (invDatabase == null)
+            {
+                MainConsole.Instance.Output("Failed to instantiate inventory database plugin.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning inventory items from database...");
+            XInventoryItem[] items;
+            try
+            {
+                items = invDatabase.GetItems(new string[0], new string[0]);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to query inventory items: " + ex.Message);
+                return;
+            }
+
+            if (items == null || items.Length == 0)
+            {
+                MainConsole.Instance.Output("No items found in inventory.");
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} inventory items. Checking for missing assets in AAS...", items.Length));
+
+            HashSet<UUID> inventoryAssetIDs = new HashSet<UUID>();
+            Dictionary<UUID, XInventoryItem> itemMetadata = new Dictionary<UUID, XInventoryItem>();
+
+            foreach (var item in items)
+            {
+                if (item.assetID != UUID.Zero)
+                {
+                    inventoryAssetIDs.Add(item.assetID);
+                    if (!itemMetadata.ContainsKey(item.assetID))
+                    {
+                        itemMetadata[item.assetID] = item;
+                    }
+                }
+            }
+
+            List<UUID> missingIDs = new List<UUID>();
+            foreach (UUID assetID in inventoryAssetIDs)
+            {
+                if (!m_PackManager.AssetExists(assetID.ToString()))
+                {
+                    missingIDs.Add(assetID);
+                }
+            }
+
+            MainConsole.Instance.Output(string.Format("Total unique assets in inventory: {0}", inventoryAssetIDs.Count));
+            MainConsole.Instance.Output(string.Format("Assets missing in AAS:           {0}", missingIDs.Count));
+
+            if (missingIDs.Count == 0)
+            {
+                MainConsole.Instance.Output("No missing assets to import. AAS is fully up-to-date with inventory.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Scanning extracted IAR assets folder for asset files...");
+            string[] allFiles;
+            try
+            {
+                allFiles = SafeGetFiles(assetsPath).ToArray();
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error scanning folder: " + ex.Message);
+                return;
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} files in assets folder. Indexing files...", allFiles.Length));
+
+            Dictionary<string, string> filesByUuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string file in allFiles)
+            {
+                string filename = Path.GetFileName(file);
+                int indx = filename.LastIndexOf(OpenSim.Framework.Serialization.ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+                if (indx >= 32)
+                {
+                    string rawUuid = filename[..indx];
+                    if (UUID.TryParse(rawUuid, out UUID assetId))
+                    {
+                        string normUuid = assetId.ToString().ToLower().Replace("-", "");
+                        filesByUuid[normUuid] = file;
+                    }
+                }
+                else
+                {
+                    string withoutExt = Path.GetFileNameWithoutExtension(file);
+                    if (UUID.TryParse(withoutExt, out UUID assetId))
+                    {
+                        string normUuid = assetId.ToString().ToLower().Replace("-", "");
+                        filesByUuid[normUuid] = file;
+                    }
+                }
+            }
+
+            MainConsole.Instance.Output("Searching and importing missing assets...");
+
+            int importedCount = 0;
+            int notFoundCount = 0;
+            int errorCount = 0;
+
+            int startIndex = m_PackManager.PromptResumeProgress("scan-inventory-iar", path, missingIDs.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("scan-inventory-iar", path, missingIDs.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:scan-inventory-iar:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 3)
+                    {
+                        int.TryParse(parts[0], out importedCount);
+                        int.TryParse(parts[1], out notFoundCount);
+                        int.TryParse(parts[2], out errorCount);
+                    }
+                }
+            }
+
+            #pragma warning disable SYSLIB0011
+            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+            #pragma warning restore SYSLIB0011
+
+            for (int i = startIndex; i < missingIDs.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Inventory IAR scan aborted by user.");
+                    return;
+                }
+                UUID assetID = missingIDs[i];
+                try
+                {
+                    string normUuid = assetID.ToString().ToLower().Replace("-", "");
+
+                    if (!filesByUuid.TryGetValue(normUuid, out string matchedFilePath))
+                    {
+                        notFoundCount++;
+                        m_PackManager.UpdateCommandProgress("scan-inventory-iar", i + 1);
+                        m_PackManager.SetConfig("cmd_state:scan-inventory-iar:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
+                        continue;
+                    }
+
+                    sbyte type = (sbyte)AssetType.Unknown;
+                    string name = null;
+
+                    if (m_GridConnector != null)
+                    {
+                        try
+                        {
+                            string existingHash;
+                            AssetMetadata dbMeta = m_GridConnector.Get(assetID.ToString(), out existingHash);
+                            if (dbMeta != null)
+                            {
+                                type = dbMeta.Type;
+                                name = dbMeta.Name;
+                            }
+                        }
+                        catch { }
+                    }
+
+                    if (name == null)
+                    {
+                        if (itemMetadata.TryGetValue(assetID, out XInventoryItem item))
+                        {
+                            type = (sbyte)item.assetType;
+                            name = item.inventoryName;
+                        }
+                        else
+                        {
+                            name = "Restored Inventory Asset " + normUuid;
+                        }
+                    }
+
+                    if (type == (sbyte)AssetType.Unknown)
+                    {
+                        string filename = Path.GetFileName(matchedFilePath);
+                        int indx = filename.LastIndexOf(OpenSim.Framework.Serialization.ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+                        if (indx >= 32)
+                        {
+                            string extension = filename[indx..];
+                            if (OpenSim.Framework.Serialization.ArchiveConstants.EXTENSION_TO_ASSET_TYPE.TryGetValue(extension, out sbyte parsedType))
+                            {
+                                type = parsedType;
+                            }
+                        }
+                    }
+
+                    byte[] extData = null;
+                    string ext = Path.GetExtension(matchedFilePath).ToLower();
+
+                    if (ext == ".gz")
+                    {
+                        using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            gz.CopyTo(ms);
+                            extData = ms.ToArray();
+                        }
+                    }
+                    else
+                    {
+                        byte[] fileBytes = File.ReadAllBytes(matchedFilePath);
+                        bool isFlotsam = false;
+                        if (fileBytes.Length > 9 && fileBytes[0] == 0x00 && fileBytes[1] == 0x01 && fileBytes[2] == 0x00 && fileBytes[3] == 0x00 && fileBytes[4] == 0x00 && fileBytes[5] == 0xff && fileBytes[6] == 0xff && fileBytes[7] == 0xff && fileBytes[8] == 0xff)
+                        {
+                            isFlotsam = true;
+                        }
+
+                        if (isFlotsam)
+                        {
+                            #pragma warning disable SYSLIB0011
+                            using (MemoryStream ms = new MemoryStream(fileBytes))
+                            {
+                                AssetBase asset = (AssetBase)bformatter.Deserialize(ms);
+                                extData = asset?.Data;
+                            }
+                            #pragma warning restore SYSLIB0011
+                        }
+                        else
+                        {
+                            extData = fileBytes;
+                        }
+                    }
+
+                    if (extData == null || extData.Length == 0)
+                    {
+                        errorCount++;
+                        m_PackManager.UpdateCommandProgress("scan-inventory-iar", i + 1);
+                        m_PackManager.SetConfig("cmd_state:scan-inventory-iar:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
+                        continue;
+                    }
+
+                    m_PackManager.StoreAssetData(assetID.ToString(), extData, type, name);
+                    importedCount++;
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Error restoring IAR asset {0}: {1}", assetID, ex.Message));
+                    errorCount++;
+                }
+                m_PackManager.UpdateCommandProgress("scan-inventory-iar", i + 1);
+                m_PackManager.SetConfig("cmd_state:scan-inventory-iar:metadata", string.Format("{0},{1},{2}", importedCount, notFoundCount, errorCount));
+            }
+
+            m_PackManager.ClearCommandProgress("scan-inventory-iar");
+            MainConsole.Instance.Output(string.Format("Total unique assets processed: {0}", missingIDs.Count));
+            MainConsole.Instance.Output(string.Format("Successfully imported:          {0}", importedCount));
+            MainConsole.Instance.Output(string.Format("Not found in IAR:              {0}", notFoundCount));
+            MainConsole.Instance.Output(string.Format("Errors during Import:          {0}", errorCount));
         }
 
         private byte[] FetchAssetFromUrl(string baseUrl, string assetId, ref sbyte type, ref string name)
