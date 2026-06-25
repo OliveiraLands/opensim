@@ -51,6 +51,7 @@ namespace OpenSim.Services.AdvancedAssetService
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private const uint MAGIC_NUMBER = 0x21534141; // "AAS!"
+        private const uint MAGIC_NUMBER_LINK = 0x214B4C41; // "ALK!" (Asset Link)
         private const ushort RECORD_VERSION = 2; // Version 2 includes Creation Date
 
         private string m_BasePath;
@@ -60,6 +61,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private long m_MaxPackSize = 512 * 1024 * 1024;
         private object m_Lock = new object();
         private HashSet<string> m_SuspiciousCache = null;
+        private bool m_Disposed = false;
 
         public int CurrentPackID
         {
@@ -207,6 +209,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 LoadConfig();
                 string activePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
                 PerformCrashRecovery(activePackPath);
+                MigrateDuplicateLinks();
             }
         }
 
@@ -240,7 +243,8 @@ namespace OpenSim.Services.AdvancedAssetService
                         
                         if (fs.Length - currentOffset < 6) break;
                         
-                        if (br.ReadUInt32() != MAGIC_NUMBER) break;
+                        uint magic = br.ReadUInt32();
+                        if (magic != MAGIC_NUMBER && magic != MAGIC_NUMBER_LINK) break;
                         ushort version = br.ReadUInt16();
                         
                         long expectedHeaderRest = 19;
@@ -253,12 +257,23 @@ namespace OpenSim.Services.AdvancedAssetService
                         if (version >= 2) br.ReadInt64(); // Created
                         
                         ushort nameLen = br.ReadUInt16();
-                        if (fs.Length - fs.Position < nameLen + 4) break;
+                        if (fs.Length - fs.Position < nameLen) break;
                         br.ReadBytes(nameLen);
                         
-                        int dataLen = br.ReadInt32();
-                        if (dataLen < 0 || fs.Length - fs.Position < dataLen) break;
-                        br.ReadBytes(dataLen);
+                        if (magic == MAGIC_NUMBER)
+                        {
+                            if (fs.Length - fs.Position < 4) break;
+                            int dataLen = br.ReadInt32();
+                            if (dataLen < 0 || fs.Length - fs.Position < dataLen) break;
+                            br.ReadBytes(dataLen);
+                        }
+                        else // magic == MAGIC_NUMBER_LINK
+                        {
+                            if (fs.Length - fs.Position < 2) break;
+                            ushort hashLen = br.ReadUInt16();
+                            if (fs.Length - fs.Position < hashLen) break;
+                            br.ReadBytes(hashLen);
+                        }
                         
                         lastValidOffset = fs.Position;
                     }
@@ -273,6 +288,219 @@ namespace OpenSim.Services.AdvancedAssetService
             catch (Exception ex)
             {
                 m_log.Error(string.Format("[AAS Recovery]: Failed to scan active pack for crash recovery: {0}", ex.Message));
+            }
+        }
+
+        private HashSet<string> ScanAllPhysicalUuids()
+        {
+            HashSet<string> physicalUuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string[] files = Directory.GetFiles(m_BasePath, "pack_*.bin");
+                foreach (string file in files)
+                {
+                    using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (BinaryReader br = new BinaryReader(fs))
+                    {
+                        while (fs.Position < fs.Length)
+                        {
+                            if (fs.Length - fs.Position < 6) break;
+                            
+                            uint magic = br.ReadUInt32();
+                            if (magic != MAGIC_NUMBER && magic != MAGIC_NUMBER_LINK) break;
+                            
+                            ushort version = br.ReadUInt16();
+                            long expectedHeaderRest = 19;
+                            if (version >= 2) expectedHeaderRest += 8;
+                            
+                            if (fs.Length - fs.Position < expectedHeaderRest) break;
+                            
+                            byte[] uuidBytes = br.ReadBytes(16);
+                            string uuidStr = new UUID(uuidBytes, 0).ToString().ToLower().Replace("-", "");
+                            physicalUuids.Add(uuidStr);
+                            
+                            br.ReadSByte(); // Type
+                            if (version >= 2) br.ReadInt64(); // Created
+                            
+                            ushort nameLen = br.ReadUInt16();
+                            if (fs.Length - fs.Position < nameLen) break;
+                            br.ReadBytes(nameLen);
+                            
+                            if (magic == MAGIC_NUMBER)
+                            {
+                                if (fs.Length - fs.Position < 4) break;
+                                int dataLen = br.ReadInt32();
+                                if (dataLen < 0 || fs.Length - fs.Position < dataLen) break;
+                                fs.Position += dataLen;
+                            }
+                            else // magic == MAGIC_NUMBER_LINK
+                            {
+                                if (fs.Length - fs.Position < 2) break;
+                                ushort hashLen = br.ReadUInt16();
+                                if (fs.Length - fs.Position < hashLen) break;
+                                fs.Position += hashLen;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error("[AAS Migration]: Error scanning physical pack files: " + ex.Message);
+            }
+            return physicalUuids;
+        }
+
+        private void MigrateDuplicateLinks()
+        {
+            lock (m_Lock)
+            {
+                string migrated = "";
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT value FROM config WHERE key = 'duplicate_links_migrated'";
+                    migrated = Convert.ToString(cmd.ExecuteScalar() ?? "");
+                }
+                if (migrated == "true") return;
+
+                m_log.Info("[AAS Migration]: Starting database duplicate asset scan and physical pack verification...");
+                
+                HashSet<string> physicalUuids = ScanAllPhysicalUuids();
+                m_log.Info(string.Format("[AAS Migration]: Found {0} UUIDs physically present in pack files.", physicalUuids.Count));
+
+                var primaryEntries = new List<PackFileIndexEntry>();
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT hash, pack_id, offset, length FROM index_assets";
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            primaryEntries.Add(new PackFileIndexEntry
+                            {
+                                Hash = reader.GetString(0),
+                                PackFileID = reader.GetInt32(1),
+                                Offset = reader.GetInt64(2),
+                                Length = reader.GetInt32(3)
+                            });
+                        }
+                    }
+                }
+
+                int migratedLinksCount = 0;
+                int processedHashes = 0;
+
+                foreach (var entry in primaryEntries)
+                {
+                    processedHashes++;
+                    string primaryUuid = ReadPrimaryUuidFromPack(entry.PackFileID, entry.Offset);
+                    if (primaryUuid == null) continue;
+
+                    var duplicateUuids = new List<AssetMetadataRecord>();
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT uuid, type, name, created FROM asset_map WHERE hash = ? AND uuid != ?";
+                        cmd.Parameters.AddWithValue(null, entry.Hash);
+                        cmd.Parameters.AddWithValue(null, primaryUuid);
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                duplicateUuids.Add(new AssetMetadataRecord
+                                {
+                                    UUID = reader.GetString(0),
+                                    Type = (sbyte)reader.GetInt32(1),
+                                    Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                                    Created = reader.GetInt64(3)
+                                });
+                            }
+                        }
+                    }
+
+                    foreach (var dup in duplicateUuids)
+                    {
+                        string normalizedDupUuid = NormalizeUUID(dup.UUID);
+                        if (!physicalUuids.Contains(normalizedDupUuid))
+                        {
+                            m_log.Info(string.Format("[AAS Migration]: Securing missing duplicate link in pack files for UUID {0} (Hash: {1})", dup.UUID, entry.Hash));
+                            WriteLinkRecordPhysically(dup.UUID, entry.Hash, dup.Type, dup.Name, dup.Created);
+                            physicalUuids.Add(normalizedDupUuid);
+                            migratedLinksCount++;
+                        }
+                    }
+                }
+
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('duplicate_links_migrated', 'true')";
+                    cmd.ExecuteNonQuery();
+                }
+
+                m_log.Info(string.Format("[AAS Migration]: Migration completed. Secured {0} missing duplicate links across {1} unique hashes in the pack files.", migratedLinksCount, processedHashes));
+            }
+        }
+
+        private string ReadPrimaryUuidFromPack(int packId, long offset)
+        {
+            string packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+            if (!File.Exists(packPath)) return null;
+
+            try
+            {
+                using (FileStream fs = new FileStream(packPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (BinaryReader br = new BinaryReader(fs))
+                {
+                    fs.Seek(offset, SeekOrigin.Begin);
+                    if (br.ReadUInt32() != MAGIC_NUMBER) return null;
+                    br.ReadUInt16(); // version
+                    return new UUID(br.ReadBytes(16), 0).ToString().ToLower().Replace("-", "");
+                }
+            }
+            catch { return null; }
+        }
+
+        private void WriteLinkRecordPhysically(string uuid, string hash, sbyte type, string name, long created)
+        {
+            string packPath = "";
+            lock (m_Lock)
+            {
+                int packId = m_CurrentPackID;
+                packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                if (new FileInfo(packPath).Exists && new FileInfo(packPath).Length > m_MaxPackSize)
+                {
+                    packId = m_CurrentPackID + 1;
+                    m_CurrentPackID = packId;
+                    packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                    
+                    ExecuteNonQuery(string.Format("INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', '{0}')", m_CurrentPackID));
+                }
+            }
+
+            try
+            {
+                using (FileStream fs = new FileStream(packPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                using (BinaryWriter bw = new BinaryWriter(fs))
+                {
+                    bw.Write(MAGIC_NUMBER_LINK);
+                    bw.Write(RECORD_VERSION);
+                    bw.Write(new UUID(uuid).GetBytes());
+                    bw.Write(type);
+                    bw.Write(created);
+                    byte[] nameBytes = Encoding.UTF8.GetBytes(name ?? "");
+                    bw.Write((ushort)nameBytes.Length);
+                    bw.Write(nameBytes);
+
+                    byte[] hashBytes = Encoding.UTF8.GetBytes(hash);
+                    bw.Write((ushort)hashBytes.Length);
+                    bw.Write(hashBytes);
+
+                    bw.Flush();
+                    fs.Flush(true);
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error(string.Format("[AAS Migration]: Failed to write link record for {0}: {1}", uuid, ex.Message));
             }
         }
 
@@ -568,6 +796,7 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 try
                 {
+                    if (m_Disposed) break;
                     string hash = ComputeHash(op.Data);
                     string nid = NormalizeUUID(op.UUID);
 
@@ -575,7 +804,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     PackFileIndexEntry entry = null;
 
                     // 1. Content-based Deduplication (Check In-Flight and Database)
-                    if (m_InFlightHashes.TryGetValue(hash, out entry))
+                    if (m_InFlightHashes.TryGetValue(hash, out entry) && entry != null)
                     {
                         isNewHash = false;
                     }
@@ -583,6 +812,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     {
                         lock (m_Lock)
                         {
+                            if (m_Disposed) break;
                             entry = GetIndexEntry(hash);
                             if (entry == null)
                             {
@@ -595,6 +825,12 @@ namespace OpenSim.Services.AdvancedAssetService
                                 m_InFlightHashes[hash] = entry;
                             }
                         }
+                    }
+
+                    if (m_Disposed) break;
+                    if (entry == null)
+                    {
+                        isNewHash = true;
                     }
 
                     long offset = 0;
@@ -650,6 +886,48 @@ namespace OpenSim.Services.AdvancedAssetService
                             Length = op.Data.Length 
                         };
                         m_InFlightHashes[hash] = entry;
+                    }
+                    else
+                    {
+                        // Write Link Record to physical pack file (OUTSIDE lock)
+                        lock (m_Lock)
+                        {
+                            packId = m_CurrentPackID;
+                            packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                            if (new FileInfo(packPath).Exists && new FileInfo(packPath).Length > m_MaxPackSize)
+                            {
+                                packId = m_CurrentPackID + 1;
+                                m_CurrentPackID = packId;
+                                packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                                
+                                QueueUpdate(cmd => {
+                                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', ?)";
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, m_CurrentPackID.ToString());
+                                    cmd.ExecuteNonQuery();
+                                });
+                            }
+                        }
+
+                        using (FileStream fs = new FileStream(packPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                        using (BinaryWriter bw = new BinaryWriter(fs))
+                        {
+                            bw.Write(MAGIC_NUMBER_LINK); 
+                            bw.Write(RECORD_VERSION);
+                            bw.Write(new UUID(op.UUID).GetBytes()); 
+                            bw.Write(op.Type);
+                            bw.Write(op.Created); 
+                            byte[] nameBytes = Encoding.UTF8.GetBytes(op.Name ?? "");
+                            bw.Write((ushort)nameBytes.Length); 
+                            bw.Write(nameBytes);
+                            
+                            byte[] hashBytes = Encoding.UTF8.GetBytes(hash);
+                            bw.Write((ushort)hashBytes.Length);
+                            bw.Write(hashBytes);
+
+                            bw.Flush();
+                            fs.Flush(true);
+                        }
                     }
 
                     lock (m_Lock)
@@ -719,7 +997,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     }
                 }
                 catch (Exception ex) { 
-                    m_log.Error("[ADVANCED ASSET SERVICE]: Background write error: " + ex.Message);
+                    if (m_Disposed) break;
+                    m_log.Error("[ADVANCED ASSET SERVICE]: Background write error", ex);
                     try { m_PendingWritesCache.TryRemove(NormalizeUUID(op.UUID), out _); } catch {}
                     op.Tcs.SetException(ex);
                 }
@@ -735,8 +1014,10 @@ namespace OpenSim.Services.AdvancedAssetService
         private void FlushBatch()
         {
             if (m_PendingUpdates.IsEmpty) return;
+            if (m_Disposed) return;
             lock (m_Lock)
             {
+                if (m_Disposed) return;
                 List<PendingUpdate> updates = new List<PendingUpdate>();
                 while (m_PendingUpdates.TryDequeue(out var pendingUpdate))
                 {
@@ -867,31 +1148,52 @@ namespace OpenSim.Services.AdvancedAssetService
                     long offset = fs.Position;
                     try
                     {
-                        if (br.ReadUInt32() != MAGIC_NUMBER) break;
+                        uint magic = br.ReadUInt32();
+                        if (magic != MAGIC_NUMBER && magic != MAGIC_NUMBER_LINK) break;
+                        
                         ushort version = br.ReadUInt16();
                         string uuid = new UUID(br.ReadBytes(16), 0).ToString().ToLower().Replace("-", "");
                         sbyte type = br.ReadSByte();
                         long created = (version >= 2) ? br.ReadInt64() : 0;
                         string name = Encoding.UTF8.GetString(br.ReadBytes(br.ReadUInt16()));
-                        int dataLen = br.ReadInt32();
-                        string hash = ComputeHash(br.ReadBytes(dataLen));
                         
-                        using (var cmd = m_Connection.CreateCommand()) {
-                            cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
-                            cmd.Parameters.AddWithValue(null, uuid);
-                            cmd.Parameters.AddWithValue(null, hash);
-                            cmd.Parameters.AddWithValue(null, (int)type);
-                            cmd.Parameters.AddWithValue(null, name);
-                            cmd.Parameters.AddWithValue(null, created);
-                            cmd.ExecuteNonQuery();
+                        if (magic == MAGIC_NUMBER)
+                        {
+                            int dataLen = br.ReadInt32();
+                            string hash = ComputeHash(br.ReadBytes(dataLen));
                             
-                            cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
-                            cmd.Parameters.Clear();
-                            cmd.Parameters.AddWithValue(null, hash);
-                            cmd.Parameters.AddWithValue(null, packId);
-                            cmd.Parameters.AddWithValue(null, offset);
-                            cmd.Parameters.AddWithValue(null, dataLen);
-                            cmd.ExecuteNonQuery();
+                            using (var cmd = m_Connection.CreateCommand()) {
+                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                cmd.Parameters.AddWithValue(null, uuid);
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, (int)type);
+                                cmd.Parameters.AddWithValue(null, name);
+                                cmd.Parameters.AddWithValue(null, created);
+                                cmd.ExecuteNonQuery();
+                                
+                                cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                cmd.Parameters.Clear();
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, packId);
+                                cmd.Parameters.AddWithValue(null, offset);
+                                cmd.Parameters.AddWithValue(null, dataLen);
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+                        else // magic == MAGIC_NUMBER_LINK
+                        {
+                            ushort hashLen = br.ReadUInt16();
+                            string hash = Encoding.UTF8.GetString(br.ReadBytes(hashLen));
+                            
+                            using (var cmd = m_Connection.CreateCommand()) {
+                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                cmd.Parameters.AddWithValue(null, uuid);
+                                cmd.Parameters.AddWithValue(null, hash);
+                                cmd.Parameters.AddWithValue(null, (int)type);
+                                cmd.Parameters.AddWithValue(null, name);
+                                cmd.Parameters.AddWithValue(null, created);
+                                cmd.ExecuteNonQuery();
+                            }
                         }
                     }
                     catch { break; }
@@ -1025,6 +1327,11 @@ namespace OpenSim.Services.AdvancedAssetService
 
         public void Dispose()
         {
+            lock (m_Lock)
+            {
+                if (m_Disposed) return;
+                m_Disposed = true;
+            }
             m_WriteQueue.CompleteAdding();
             m_BatchTimer?.Stop();
             if (m_WriteTask != null)
@@ -1609,6 +1916,37 @@ namespace OpenSim.Services.AdvancedAssetService
                                     destBw.Write(dataLen);
                                     destBw.Write(dataBytes);
 
+                                    // Query and write link records for duplicate UUIDs mapping to this hash
+                                    using (var cmdLinks = m_Connection.CreateCommand())
+                                    {
+                                        cmdLinks.CommandText = "SELECT uuid, type, name, created FROM asset_map WHERE hash = ? AND uuid != ?";
+                                        cmdLinks.Parameters.AddWithValue(null, entry.Hash);
+                                        cmdLinks.Parameters.AddWithValue(null, entry.UUID); // exclude primary
+                                        using (var readerLinks = cmdLinks.ExecuteReader())
+                                        {
+                                            while (readerLinks.Read())
+                                            {
+                                                string linkUuid = readerLinks.GetString(0);
+                                                sbyte linkType = (sbyte)readerLinks.GetInt32(1);
+                                                string linkName = readerLinks.IsDBNull(2) ? "" : readerLinks.GetString(2);
+                                                long linkCreated = readerLinks.GetInt64(3);
+
+                                                byte[] linkNameBytes = Encoding.UTF8.GetBytes(linkName);
+                                                byte[] linkHashBytes = Encoding.UTF8.GetBytes(entry.Hash);
+
+                                                destBw.Write(MAGIC_NUMBER_LINK);
+                                                destBw.Write(version);
+                                                destBw.Write(new UUID(linkUuid).GetBytes());
+                                                destBw.Write(linkType);
+                                                destBw.Write(linkCreated);
+                                                destBw.Write((ushort)linkNameBytes.Length);
+                                                destBw.Write(linkNameBytes);
+                                                destBw.Write((ushort)linkHashBytes.Length);
+                                                destBw.Write(linkHashBytes);
+                                            }
+                                        }
+                                    }
+
                                     var ne = new PackFileIndexEntry
                                     {
                                         Hash = entry.Hash,
@@ -1781,7 +2119,7 @@ namespace OpenSim.Services.AdvancedAssetService
                         using (BinaryReader br = new BinaryReader(fs, Encoding.UTF8, true))
                         {
                             uint magic = br.ReadUInt32();
-                            if (magic != MAGIC_NUMBER)
+                            if (magic != MAGIC_NUMBER && magic != MAGIC_NUMBER_LINK)
                             {
                                 fs.Seek(offset + 1, SeekOrigin.Begin);
                                 continue;
@@ -1794,27 +2132,47 @@ namespace OpenSim.Services.AdvancedAssetService
                             long created = (version >= 2) ? br.ReadInt64() : 0;
                             ushort nameLen = br.ReadUInt16();
                             string name = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
-                            int dataLen = br.ReadInt32();
-                            byte[] dataBytes = br.ReadBytes(dataLen);
-                            string hash = ComputeHash(dataBytes);
 
-                            using (var cmd = m_Connection.CreateCommand())
+                            if (magic == MAGIC_NUMBER)
                             {
-                                cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
-                                cmd.Parameters.AddWithValue(null, uuid);
-                                cmd.Parameters.AddWithValue(null, hash);
-                                cmd.Parameters.AddWithValue(null, (int)type);
-                                cmd.Parameters.AddWithValue(null, name);
-                                cmd.Parameters.AddWithValue(null, created);
-                                cmd.ExecuteNonQuery();
+                                int dataLen = br.ReadInt32();
+                                byte[] dataBytes = br.ReadBytes(dataLen);
+                                string hash = ComputeHash(dataBytes);
 
-                                cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
-                                cmd.Parameters.Clear();
-                                cmd.Parameters.AddWithValue(null, hash);
-                                cmd.Parameters.AddWithValue(null, packId);
-                                cmd.Parameters.AddWithValue(null, offset);
-                                cmd.Parameters.AddWithValue(null, dataLen);
-                                cmd.ExecuteNonQuery();
+                                using (var cmd = m_Connection.CreateCommand())
+                                {
+                                    cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                    cmd.Parameters.AddWithValue(null, uuid);
+                                    cmd.Parameters.AddWithValue(null, hash);
+                                    cmd.Parameters.AddWithValue(null, (int)type);
+                                    cmd.Parameters.AddWithValue(null, name);
+                                    cmd.Parameters.AddWithValue(null, created);
+                                    cmd.ExecuteNonQuery();
+
+                                    cmd.CommandText = "INSERT OR IGNORE INTO index_assets (hash, pack_id, offset, length) VALUES (?, ?, ?, ?)";
+                                    cmd.Parameters.Clear();
+                                    cmd.Parameters.AddWithValue(null, hash);
+                                    cmd.Parameters.AddWithValue(null, packId);
+                                    cmd.Parameters.AddWithValue(null, offset);
+                                    cmd.Parameters.AddWithValue(null, dataLen);
+                                    cmd.ExecuteNonQuery();
+                                }
+                            }
+                            else // magic == MAGIC_NUMBER_LINK
+                            {
+                                ushort hashLen = br.ReadUInt16();
+                                string hash = Encoding.UTF8.GetString(br.ReadBytes(hashLen));
+
+                                using (var cmd = m_Connection.CreateCommand())
+                                {
+                                    cmd.CommandText = "INSERT OR REPLACE INTO asset_map (uuid, hash, type, name, created, synced) VALUES (?, ?, ?, ?, ?, 0)";
+                                    cmd.Parameters.AddWithValue(null, uuid);
+                                    cmd.Parameters.AddWithValue(null, hash);
+                                    cmd.Parameters.AddWithValue(null, (int)type);
+                                    cmd.Parameters.AddWithValue(null, name);
+                                    cmd.Parameters.AddWithValue(null, created);
+                                    cmd.ExecuteNonQuery();
+                                }
                             }
                         }
                     }

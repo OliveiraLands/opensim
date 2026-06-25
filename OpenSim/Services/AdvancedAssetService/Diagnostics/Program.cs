@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Nini.Config;
@@ -46,6 +47,7 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
             RunUniqueWritesLoadTest();
             RunConflictWritesLoadTest();
             RunReadWriteContentionTest();
+            RunDisasterRecoveryTest();
 
             Console.WriteLine("\nDiagnostics completed successfully.");
         }
@@ -273,6 +275,103 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
             }
         }
 
+        private static void RunDisasterRecoveryTest()
+        {
+            Console.WriteLine("\n--- Test 4: Disaster Recovery of Deduplicated Assets (Symbolic Links) ---");
+            string dbPath = Path.Combine(StoragePath, "index.db");
+
+            var primaryAssets = new Dictionary<string, byte[]>();
+            var duplicateAssets = new Dictionary<string, string>(); // duplicateUUID -> primaryUUID
+
+            using (var service = CreateService())
+            {
+                Console.WriteLine("Storing primary assets and their duplicate links...");
+                for (int i = 0; i < 5; i++)
+                {
+                    UUID primaryId = UUID.Random();
+                    byte[] data = Encoding.UTF8.GetBytes(string.Format("DeduplicatedContentData_{0}", i));
+                    
+                    AssetBase primaryAsset = new AssetBase(primaryId, string.Format("PrimaryAsset_{0}", i), (sbyte)AssetType.Texture, UUID.Zero.ToString());
+                    primaryAsset.Data = data;
+                    service.Store(primaryAsset);
+                    primaryAssets[primaryId.ToString()] = data;
+
+                    for (int d = 0; d < 3; d++)
+                    {
+                        UUID duplicateId = UUID.Random();
+                        AssetBase duplicateAsset = new AssetBase(duplicateId, string.Format("DuplicateAsset_{0}_{1}", i, d), (sbyte)AssetType.Texture, UUID.Zero.ToString());
+                        duplicateAsset.Data = data; // Trigger deduplication
+                        service.Store(duplicateAsset);
+                        duplicateAssets[duplicateId.ToString()] = primaryId.ToString();
+                    }
+                }
+
+                Console.WriteLine("Waiting for background queue to flush...");
+                Thread.Sleep(3000);
+            }
+
+            Console.WriteLine("Simulating database disaster by deleting SQLite index.db...");
+            if (File.Exists(dbPath))
+            {
+                File.Delete(dbPath);
+                Console.WriteLine("Database file deleted successfully.");
+            }
+            else
+            {
+                Console.WriteLine("[ERROR] index.db was not found!");
+                return;
+            }
+
+            Console.WriteLine("Re-opening service with empty database...");
+            using (var service = CreateService())
+            {
+                foreach (var id in primaryAssets.Keys)
+                {
+                    if (service.Get(id) != null)
+                    {
+                        Console.WriteLine("[ERROR] Asset was found in empty database before rebuild!");
+                        return;
+                    }
+                }
+
+                Console.WriteLine("Triggering RebuildIndex to recover database from pack files...");
+                service.RebuildIndexDiag();
+                Console.WriteLine("Rebuild completed.");
+
+                int recoveredPrimary = 0;
+                foreach (var kvp in primaryAssets)
+                {
+                    AssetBase recovered = service.Get(kvp.Key);
+                    if (recovered != null && CompareBytes(recovered.Data, kvp.Value))
+                    {
+                        recoveredPrimary++;
+                    }
+                }
+                Console.WriteLine(string.Format("Recovered primary assets: {0} / {1}", recoveredPrimary, primaryAssets.Count));
+
+                int recoveredDuplicates = 0;
+                foreach (var kvp in duplicateAssets)
+                {
+                    AssetBase recovered = service.Get(kvp.Key);
+                    byte[] expectedData = primaryAssets[kvp.Value];
+                    if (recovered != null && CompareBytes(recovered.Data, expectedData))
+                    {
+                        recoveredDuplicates++;
+                    }
+                }
+                Console.WriteLine(string.Format("Recovered deduplicated asset links: {0} / {1}", recoveredDuplicates, duplicateAssets.Count));
+
+                if (recoveredPrimary == primaryAssets.Count && recoveredDuplicates == duplicateAssets.Count)
+                {
+                    Console.WriteLine("Disaster Recovery Test: PASSED. All duplicate links successfully recovered from pack files.");
+                }
+                else
+                {
+                    Console.WriteLine("Disaster Recovery Test: FAILED. Missing recovered assets.");
+                }
+            }
+        }
+
         private static bool CompareBytes(byte[] a, byte[] b)
         {
             if (a == null || b == null) return a == b;
@@ -289,7 +388,6 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
     {
         public static void VerifyIntegrityDiag(this AdvancedAssetService service, Action<string> output)
         {
-            // Use reflection to access PackFileManager and call VerifyIntegrity
             var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", BindingFlags.Instance | BindingFlags.NonPublic);
             if (packManagerField != null)
             {
@@ -298,6 +396,20 @@ namespace OpenSim.Services.AdvancedAssetService.Diagnostics
                 {
                     var verifyMethod = packManager.GetType().GetMethod("VerifyIntegrity", BindingFlags.Instance | BindingFlags.Public);
                     verifyMethod?.Invoke(packManager, new object[] { output });
+                }
+            }
+        }
+
+        public static void RebuildIndexDiag(this AdvancedAssetService service)
+        {
+            var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (packManagerField != null)
+            {
+                var packManager = packManagerField.GetValue(service);
+                if (packManager != null)
+                {
+                    var rebuildMethod = packManager.GetType().GetMethod("RebuildIndex", BindingFlags.Instance | BindingFlags.Public);
+                    rebuildMethod?.Invoke(packManager, null);
                 }
             }
         }
