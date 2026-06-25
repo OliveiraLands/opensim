@@ -632,6 +632,7 @@
         <Match pattern="*.cs" recurse="true">
           <Exclude name="obj" pattern="obj"/>
           <Exclude name="Tests" pattern="Tests"/>
+          <Exclude name="Diagnostics" pattern="Diagnostics"/>
         </Match>
       </Files>
     </Project>
@@ -658,6 +659,34 @@
       <Reference name="nunit.framework"/>
       <PackageReference name="Microsoft.NET.Test.Sdk" version="17.8.0"/>
       <PackageReference name="NUnit3TestAdapter" version="4.5.0"/>
+      <Files>
+        <Match pattern="*.cs" recurse="true">
+          <Exclude name="obj" pattern="obj"/>
+        </Match>
+      </Files>
+    </Project>
+
+    <Project name="OpenSim.Services.AdvancedAssetService.Diagnostics" path="OpenSim/Services/AdvancedAssetService/Diagnostics" type="Exe" assemblyName="AdvancedAssetDiagnostics">
+      <Configuration name="Debug">
+        <Options>
+          <OutputPath>../../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+      <Configuration name="Release">
+        <Options>
+          <OutputPath>../../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+
+      <ReferencePath>../../../../bin/</ReferencePath>
+      <Reference name="OpenMetaverseTypes"/>
+      <Reference name="OpenMetaverse"/>
+      <Reference name="OpenSim.Framework"/>
+      <Reference name="OpenSim.Services.AdvancedAssetService"/>
+      <Reference name="OpenSim.Services.Interfaces"/>
+      <Reference name="System.Data.SQLite"/>
+      <Reference name="Nini"/>
+      <Reference name="log4net"/>
       <Files>
         <Match pattern="*.cs" recurse="true">
           <Exclude name="obj" pattern="obj"/>
