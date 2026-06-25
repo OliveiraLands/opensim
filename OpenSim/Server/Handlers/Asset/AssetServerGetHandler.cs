@@ -154,6 +154,11 @@ namespace OpenSim.Server.Handlers.Asset
                 result = Array.Empty<byte>();
             }
 
+            if (httpResponse.StatusCode == (int)HttpStatusCode.OK)
+            {
+                httpResponse.AddHeader("Cache-Control", "public, max-age=31536000, immutable");
+            }
+
             if (httpResponse.StatusCode == (int)HttpStatusCode.NotFound && !string.IsNullOrEmpty(m_RedirectURL) && !string.IsNullOrEmpty(id))
             {
                 string rurl = m_RedirectURL;

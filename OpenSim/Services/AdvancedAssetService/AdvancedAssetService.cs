@@ -1426,7 +1426,7 @@ namespace OpenSim.Services.AdvancedAssetService
             try
             {
                 string assetUrl = cleanUrl + "/assets/" + assetId;
-                AssetBase asset = SynchronousRestObjectRequester.MakeGetRequest<AssetBase>(assetUrl, 10000, null);
+                AssetBase asset = SynchronousRestObjectRequester.MakeGetRequest<AssetBase>(assetUrl, 60000, null);
                 if (asset != null && asset.Data != null && asset.Data.Length > 0)
                 {
                     type = asset.Type;
@@ -1476,7 +1476,7 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 System.Net.HttpWebRequest request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
                 request.Method = "GET";
-                request.Timeout = 10000; // 10 seconds timeout
+                request.Timeout = 60000; // 60 seconds timeout
                 request.UserAgent = "OpenSim AdvancedAssetService Importer";
                 
                 using (System.Net.HttpWebResponse response = (System.Net.HttpWebResponse)request.GetResponse())
