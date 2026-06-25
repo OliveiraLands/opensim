@@ -186,7 +186,7 @@ namespace OpenSim.Services.AdvancedAssetService
                 bool exists = File.Exists(m_IndexFile);
                 m_Connection = new SQLiteConnection($"Data Source={m_IndexFile};Version=3;Cache Size=20000;");
                 m_Connection.Open();
-                ExecuteNonQuery("PRAGMA journal_mode=WAL; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;");
+                ExecuteNonQuery("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;");
                 
                 if (!exists)
                 {
@@ -205,6 +205,8 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
                 ExecuteNonQuery("CREATE TABLE IF NOT EXISTS suspicious_assets (uuid TEXT PRIMARY KEY COLLATE NOCASE, flagged_at INTEGER)");
                 LoadConfig();
+                string activePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
+                PerformCrashRecovery(activePackPath);
             }
         }
 
@@ -219,6 +221,58 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 cmd.CommandText = "SELECT value FROM config WHERE key = 'current_pack_id'";
                 m_CurrentPackID = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+            }
+        }
+
+        private void PerformCrashRecovery(string activePackPath)
+        {
+            if (!File.Exists(activePackPath)) return;
+
+            long lastValidOffset = 0;
+            try
+            {
+                using (FileStream fs = new FileStream(activePackPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                using (BinaryReader br = new BinaryReader(fs))
+                {
+                    while (fs.Position < fs.Length)
+                    {
+                        long currentOffset = fs.Position;
+                        
+                        if (fs.Length - currentOffset < 6) break;
+                        
+                        if (br.ReadUInt32() != MAGIC_NUMBER) break;
+                        ushort version = br.ReadUInt16();
+                        
+                        long expectedHeaderRest = 19;
+                        if (version >= 2) expectedHeaderRest += 8;
+                        
+                        if (fs.Length - fs.Position < expectedHeaderRest) break;
+                        
+                        br.ReadBytes(16); // UUID
+                        br.ReadSByte(); // Type
+                        if (version >= 2) br.ReadInt64(); // Created
+                        
+                        ushort nameLen = br.ReadUInt16();
+                        if (fs.Length - fs.Position < nameLen + 4) break;
+                        br.ReadBytes(nameLen);
+                        
+                        int dataLen = br.ReadInt32();
+                        if (dataLen < 0 || fs.Length - fs.Position < dataLen) break;
+                        br.ReadBytes(dataLen);
+                        
+                        lastValidOffset = fs.Position;
+                    }
+
+                    if (fs.Length > lastValidOffset)
+                    {
+                        m_log.Warn(string.Format("[AAS Recovery]: Truncating corrupted trailing bytes in active pack at offset {0}. Saved {1} bytes of corrupt data.", lastValidOffset, fs.Length - lastValidOffset));
+                        fs.SetLength(lastValidOffset);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error(string.Format("[AAS Recovery]: Failed to scan active pack for crash recovery: {0}", ex.Message));
             }
         }
 
@@ -583,6 +637,9 @@ namespace OpenSim.Services.AdvancedAssetService
                             bw.Write(nameBytes);
                             bw.Write(op.Data.Length); 
                             bw.Write(op.Data);
+
+                            bw.Flush();
+                            fs.Flush(true);
                         }
 
                         entry = new PackFileIndexEntry 
