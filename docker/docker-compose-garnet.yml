@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Serviço principal: Microsoft Garnet (Cache de altíssima performance compatível com Redis)
+  # Configurado com persistência AOF gravada na pasta local '../garnet-data' e limite de memória de 2 GB.
+  garnet:
+    image: ghcr.io/microsoft/garnet:latest
+    container_name: opensim-garnet-cache
+    command: --aof --memory 2g --index 256m
+    ports:
+      - "6379:6379"
+    volumes:
+      - ../garnet-data:/data
+    working_dir: /data
+    restart: unless-stopped
+    networks:
+      - opensim-network
+
+  # Painel de controle visual: Redis Insight (Interface gráfica premium oficial para gerenciar chaves e monitorar o cache)
+  # Compatível com o Microsoft Garnet (via protocolo RESP do Redis).
+  # Disponível no navegador em: http://localhost:8001
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: opensim-redis-insight
+    ports:
+      - "8001:8001"
+    volumes:
+      - redisinsight-data:/db
+    restart: unless-stopped
+    depends_on:
+      - garnet
+    networks:
+      - opensim-network
+
+volumes:
+  redisinsight-data:
+    driver: local
+
+networks:
+  opensim-network:
+    driver: bridge
