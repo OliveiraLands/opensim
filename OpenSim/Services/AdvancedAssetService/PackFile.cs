@@ -92,6 +92,19 @@ namespace OpenSim.Services.AdvancedAssetService
             m_BatchTimer.Start();
 
             m_WriteTask = Task.Factory.StartNew(ProcessWriteQueue, TaskCreationOptions.LongRunning);
+
+            // Run link migration asynchronously in the background so it doesn't block startup
+            Task.Run(() =>
+            {
+                try
+                {
+                    MigrateDuplicateLinks();
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error("[AAS Migration]: Background migration failed: " + ex.Message);
+                }
+            });
         }
 
         public void ClearSuspiciousStatus(string uuid)
@@ -209,7 +222,6 @@ namespace OpenSim.Services.AdvancedAssetService
                 LoadConfig();
                 string activePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
                 PerformCrashRecovery(activePackPath);
-                MigrateDuplicateLinks();
             }
         }
 
@@ -353,36 +365,45 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void MigrateDuplicateLinks()
         {
-            lock (m_Lock)
+            try
             {
                 string migrated = "";
-                using (var cmd = m_Connection.CreateCommand())
+                lock (m_Lock)
                 {
-                    cmd.CommandText = "SELECT value FROM config WHERE key = 'duplicate_links_migrated'";
-                    migrated = Convert.ToString(cmd.ExecuteScalar() ?? "");
+                    if (m_Disposed) return;
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT value FROM config WHERE key = 'duplicate_links_migrated'";
+                        migrated = Convert.ToString(cmd.ExecuteScalar() ?? "");
+                    }
                 }
                 if (migrated == "true") return;
 
                 m_log.Info("[AAS Migration]: Starting database duplicate asset scan and physical pack verification...");
                 
                 HashSet<string> physicalUuids = ScanAllPhysicalUuids();
+                if (m_Disposed) return;
                 m_log.Info(string.Format("[AAS Migration]: Found {0} UUIDs physically present in pack files.", physicalUuids.Count));
 
                 var primaryEntries = new List<PackFileIndexEntry>();
-                using (var cmd = m_Connection.CreateCommand())
+                lock (m_Lock)
                 {
-                    cmd.CommandText = "SELECT hash, pack_id, offset, length FROM index_assets";
-                    using (var reader = cmd.ExecuteReader())
+                    if (m_Disposed) return;
+                    using (var cmd = m_Connection.CreateCommand())
                     {
-                        while (reader.Read())
+                        cmd.CommandText = "SELECT hash, pack_id, offset, length FROM index_assets";
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            primaryEntries.Add(new PackFileIndexEntry
+                            while (reader.Read())
                             {
-                                Hash = reader.GetString(0),
-                                PackFileID = reader.GetInt32(1),
-                                Offset = reader.GetInt64(2),
-                                Length = reader.GetInt32(3)
-                            });
+                                primaryEntries.Add(new PackFileIndexEntry
+                                {
+                                    Hash = reader.GetString(0),
+                                    PackFileID = reader.GetInt32(1),
+                                    Offset = reader.GetInt64(2),
+                                    Length = reader.GetInt32(3)
+                                });
+                            }
                         }
                     }
                 }
@@ -392,33 +413,39 @@ namespace OpenSim.Services.AdvancedAssetService
 
                 foreach (var entry in primaryEntries)
                 {
+                    if (m_Disposed) return;
                     processedHashes++;
                     string primaryUuid = ReadPrimaryUuidFromPack(entry.PackFileID, entry.Offset);
                     if (primaryUuid == null) continue;
 
                     var duplicateUuids = new List<AssetMetadataRecord>();
-                    using (var cmd = m_Connection.CreateCommand())
+                    lock (m_Lock)
                     {
-                        cmd.CommandText = "SELECT uuid, type, name, created FROM asset_map WHERE hash = ? AND uuid != ?";
-                        cmd.Parameters.AddWithValue(null, entry.Hash);
-                        cmd.Parameters.AddWithValue(null, primaryUuid);
-                        using (var reader = cmd.ExecuteReader())
+                        if (m_Disposed) return;
+                        using (var cmd = m_Connection.CreateCommand())
                         {
-                            while (reader.Read())
+                            cmd.CommandText = "SELECT uuid, type, name, created FROM asset_map WHERE hash = ? AND uuid != ?";
+                            cmd.Parameters.AddWithValue(null, entry.Hash);
+                            cmd.Parameters.AddWithValue(null, primaryUuid);
+                            using (var reader = cmd.ExecuteReader())
                             {
-                                duplicateUuids.Add(new AssetMetadataRecord
+                                while (reader.Read())
                                 {
-                                    UUID = reader.GetString(0),
-                                    Type = (sbyte)reader.GetInt32(1),
-                                    Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                                    Created = reader.GetInt64(3)
-                                });
+                                    duplicateUuids.Add(new AssetMetadataRecord
+                                    {
+                                        UUID = reader.GetString(0),
+                                        Type = (sbyte)reader.GetInt32(1),
+                                        Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                                        Created = reader.GetInt64(3)
+                                    });
+                                }
                             }
                         }
                     }
 
                     foreach (var dup in duplicateUuids)
                     {
+                        if (m_Disposed) return;
                         string normalizedDupUuid = NormalizeUUID(dup.UUID);
                         if (!physicalUuids.Contains(normalizedDupUuid))
                         {
@@ -430,13 +457,26 @@ namespace OpenSim.Services.AdvancedAssetService
                     }
                 }
 
-                using (var cmd = m_Connection.CreateCommand())
+                lock (m_Lock)
                 {
-                    cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('duplicate_links_migrated', 'true')";
-                    cmd.ExecuteNonQuery();
+                    if (m_Disposed) return;
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "INSERT OR REPLACE INTO config (key, value) VALUES ('duplicate_links_migrated', 'true')";
+                        cmd.ExecuteNonQuery();
+                    }
                 }
 
                 m_log.Info(string.Format("[AAS Migration]: Migration completed. Secured {0} missing duplicate links across {1} unique hashes in the pack files.", migratedLinksCount, processedHashes));
+            }
+            catch (Exception)
+            {
+                if (m_Disposed)
+                {
+                    // Ignore exceptions if we are disposing/disposed
+                    return;
+                }
+                throw;
             }
         }
 
