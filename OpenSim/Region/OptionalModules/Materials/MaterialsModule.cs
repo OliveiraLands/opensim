@@ -157,7 +157,7 @@ namespace OpenSim.Region.OptionalModules.Materials
                             {
                                 m_Materials.Remove(id);
                                 m_MaterialsRefCount.Remove(id);
-                                m_cache.Expire(id.ToString());
+                                m_cache?.Expire(id.ToString());
                                 ++throttle;
                             }
                         }

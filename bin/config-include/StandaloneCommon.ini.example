@@ -78,6 +78,9 @@
     ;AssetCaching = "AdvancedAssetCache"
     ;Include-AdvancedAssetCache = "config-include/AdvancedAssetCache.ini"
 
+    ;AssetCaching = "RedisAssetCache"
+    ;Include-RedisCache = "config-include/RedisCache.ini"
+
     ;; Authorization is not on by default, as it depends on external php
     ;AuthorizationServices = "LocalAuthorizationServicesConnector"
 

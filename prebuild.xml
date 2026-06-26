@@ -1144,11 +1144,13 @@
       <Configuration name="Debug">
         <Options>
           <OutputPath>../../bin/</OutputPath>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../bin/</OutputPath>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
 
@@ -1166,6 +1168,7 @@
       <Reference name="log4net"/>
       <Reference name="Mono.Addins"/>
       <Reference name="Mono.Addins.Setup"/>
+      <PackageReference name="StackExchange.Redis" version="2.8.0"/>
 
       <Files>
         <Match pattern="*.cs" recurse="false">
@@ -1402,12 +1405,14 @@
         <Options>
           <OutputPath>../../../bin/</OutputPath>
           <AllowUnsafe>true</AllowUnsafe>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../../bin/</OutputPath>
           <AllowUnsafe>true</AllowUnsafe>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
 
@@ -1439,6 +1444,7 @@
       <Reference name="System.Data.SQLite"/>
       <Reference name="Ionic.Zip"/>
       <Reference name="MySql.Data"/>
+      <PackageReference name="StackExchange.Redis" version="2.8.0"/>
 
       <!-- For scripting in funny languages by default -->
       <Reference name="XMLRPC"/>
@@ -1738,12 +1744,14 @@
         <Options>
           <OutputPath>../../../bin/</OutputPath>
           <OutputType>Exe</OutputType>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../../bin/</OutputPath>
           <OutputType>Exe</OutputType>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </Options>
       </Configuration>
 
@@ -1769,6 +1777,7 @@
       <Reference name="XMLRPC"/>
       <Reference name="Nini"/>
       <Reference name="log4net"/>
+      <PackageReference name="StackExchange.Redis" version="2.8.0"/>
 
     </Project>
 

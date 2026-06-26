@@ -1,0 +1,25 @@
+[AssetCache]
+    ;;
+    ;; Opções para o RedisAssetCache
+    ;;
+    ;; O RedisAssetCache é um cache centralizado e em memória (L2) de alta performance.
+    ;; Ele elimina a necessidade de cache em disco local nas instâncias de simuladores.
+    ;;
+
+    ;; String de conexão para o servidor Redis (suporta clusters ou Sentinel)
+    ;; Padrão: localhost:6379
+    ; RedisConnectionString = "localhost:6379"
+
+    ;; Tempo de expiração padrão (Time to Live) em segundos para assets em cache.
+    ;; Padrão: 86400 (24 horas)
+    ; CacheTTL = 86400
+
+    ;; Habilitar compressão Deflate para reduzir o uso de memória RAM no Redis.
+    ;; Padrão: true
+    ; UseCompression = true
+
+    ;; Capacidade máxima do cache L1 (Memória Local em RAM na própria instância do simulador).
+    ;; Funciona como um cache de altíssima performance para os itens mais acessados (hot assets)
+    ;; e serve como fallback automático caso o servidor Redis fique indisponível.
+    ;; Padrão: 1000 itens (defina como 0 para desativar o cache L1 local)
+    ; L1CacheCapacity = 1000

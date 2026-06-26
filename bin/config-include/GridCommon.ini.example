@@ -76,6 +76,9 @@
     ;AssetCaching = "AdvancedAssetCache"
     ;Include-AdvancedAssetCache = "config-include/AdvancedAssetCache.ini"
 
+    ;AssetCaching = "RedisAssetCache"
+    ;Include-RedisCache = "config-include/RedisCache.ini"
+
     ;; Optionally, the port for the LLProxyLoginModule module can be changed
     ;Setup_LLProxyLoginModule = "9090/"
 
