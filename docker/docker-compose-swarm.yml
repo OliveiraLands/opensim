@@ -1,0 +1,358 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # TRAEFIK REVERSE PROXY (Swarm Gateway)
+  # ----------------------------------------------------------------------------
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge=true"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.cloudflare.acme.email=admin@oligrid.net" # Change to your email
+      - "--certificatesresolvers.cloudflare.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certificates:/letsencrypt
+    environment:
+      - CF_DNS_API_TOKEN_FILE=/run/secrets/cloudflare_api_token
+    secrets:
+      - cloudflare_api_token
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+    networks:
+      - opensim-network
+
+  # ----------------------------------------------------------------------------
+  # DATABASE (MariaDB with Host Bind Mount for persistence)
+  # ----------------------------------------------------------------------------
+  db:
+    image: mariadb:10.11
+    ports:
+      - "3306:3306" # Exposes DB port for external management tools
+    environment:
+      - MARIADB_DATABASE=os_oligridnet
+      - MARIADB_USER=osuser
+      - MARIADB_PASSWORD_FILE=/run/secrets/db_password
+      - MARIADB_RANDOM_ROOT_PASSWORD=true
+    volumes:
+      # Mounts to parent directory 'mysql-data' on host filesystem (external to docker)
+      - ../mysql-data:/var/lib/mysql
+    configs:
+      - source: db_init_sql
+        target: /docker-entrypoint-initdb.d/init.sql
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager # Ensures host-mount path remains consistent on Swarm Manager
+      restart_policy:
+        condition: on-failure
+    networks:
+      - opensim-network
+
+  # ----------------------------------------------------------------------------
+  # CACHE (Microsoft Garnet)
+  # ----------------------------------------------------------------------------
+  garnet:
+    image: ghcr.io/microsoft/garnet:latest
+    command: --aof --memory 2g --index 256m
+    volumes:
+      - garnet-data:/data
+    working_dir: /data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - opensim-network
+
+  # ----------------------------------------------------------------------------
+  # ROBUST SPLIT SERVICES
+  # ----------------------------------------------------------------------------
+  robust-asset:
+    image: opensim-robust:latest
+    command: dotnet Robust.dll -inifile=/app/config/robust.asset.ini
+    volumes:
+      - asset-data:/app/asset_packs
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: robust_asset
+        target: /etc/opensim/config/robust.asset.ini
+    secrets:
+      - db_password
+      - s3_access_key
+      - s3_secret_key
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Map asset.oligrid.net to private asset port 8003
+        - "traefik.http.routers.robust-asset.rule=Host(`asset.oligrid.net`)"
+        - "traefik.http.routers.robust-asset.entrypoints=websecure"
+        - "traefik.http.routers.robust-asset.tls=true"
+        - "traefik.http.routers.robust-asset.tls.certresolver=cloudflare"
+        - "traefik.http.services.robust-asset.loadbalancer.server.port=8003"
+    networks:
+      - opensim-network
+
+  robust-inventory:
+    image: opensim-robust:latest
+    command: dotnet Robust.dll -inifile=/app/config/robust.inventory.ini
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: robust_inventory
+        target: /etc/opensim/config/robust.inventory.ini
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Map inventory.oligrid.net to private inventory port 8003
+        - "traefik.http.routers.robust-inventory.rule=Host(`inventory.oligrid.net`)"
+        - "traefik.http.routers.robust-inventory.entrypoints=websecure"
+        - "traefik.http.routers.robust-inventory.tls=true"
+        - "traefik.http.routers.robust-inventory.tls.certresolver=cloudflare"
+        - "traefik.http.services.robust-inventory.loadbalancer.server.port=8003"
+    networks:
+      - opensim-network
+
+  robust-grid:
+    image: opensim-robust:latest
+    command: dotnet Robust.dll -inifile=/app/config/robust.grid.ini
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: robust_grid
+        target: /etc/opensim/config/robust.grid.ini
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # 1. Public GridInfo Service (Port 8001)
+        - "traefik.http.routers.robust-grid-public.rule=Host(`grid.oligrid.net`)"
+        - "traefik.http.routers.robust-grid-public.entrypoints=websecure"
+        - "traefik.http.routers.robust-grid-public.tls=true"
+        - "traefik.http.routers.robust-grid-public.tls.certresolver=cloudflare"
+        - "traefik.http.routers.robust-grid-public.service=robust-grid-public"
+        - "traefik.http.services.robust-grid-public.loadbalancer.server.port=8001"
+        # 2. Private Grid Service (Port 8003)
+        - "traefik.http.routers.robust-grid-private.rule=Host(`private-grid.oligrid.net`)"
+        - "traefik.http.routers.robust-grid-private.entrypoints=websecure"
+        - "traefik.http.routers.robust-grid-private.tls=true"
+        - "traefik.http.routers.robust-grid-private.tls.certresolver=cloudflare"
+        - "traefik.http.routers.robust-grid-private.service=robust-grid-private"
+        - "traefik.http.services.robust-grid-private.loadbalancer.server.port=8003"
+    networks:
+      - opensim-network
+
+  robust-user:
+    image: opensim-robust:latest
+    command: dotnet Robust.dll -inifile=/app/config/robust.user.ini
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: robust_user
+        target: /etc/opensim/config/robust.user.ini
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # 1. Public Login/LLLogin Service (Port 8002)
+        - "traefik.http.routers.robust-user-public.rule=Host(`login.oligrid.net`)"
+        - "traefik.http.routers.robust-user-public.entrypoints=websecure"
+        - "traefik.http.routers.robust-user-public.tls=true"
+        - "traefik.http.routers.robust-user-public.tls.certresolver=cloudflare"
+        - "traefik.http.routers.robust-user-public.service=robust-user-public"
+        - "traefik.http.services.robust-user-public.loadbalancer.server.port=8002"
+        # 2. Private User/Presence/Friends Service (Port 8003)
+        - "traefik.http.routers.robust-user-private.rule=Host(`private-user.oligrid.net`)"
+        - "traefik.http.routers.robust-user-private.entrypoints=websecure"
+        - "traefik.http.routers.robust-user-private.tls=true"
+        - "traefik.http.routers.robust-user-private.tls.certresolver=cloudflare"
+        - "traefik.http.routers.robust-user-private.service=robust-user-private"
+        - "traefik.http.services.robust-user-private.loadbalancer.server.port=8003"
+    networks:
+      - opensim-network
+
+  robust-hg:
+    image: opensim-robust:latest
+    command: dotnet Robust.dll -inifile=/app/config/robust.hg.ini
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: robust_hg
+        target: /etc/opensim/config/robust.hg.ini
+    secrets:
+      - db_password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Map hg.oligrid.net to public Gatekeeper/UserAgent port 8002
+        - "traefik.http.routers.robust-hg.rule=Host(`hg.oligrid.net`)"
+        - "traefik.http.routers.robust-hg.entrypoints=websecure"
+        - "traefik.http.routers.robust-hg.tls=true"
+        - "traefik.http.routers.robust-hg.tls.certresolver=cloudflare"
+        - "traefik.http.services.robust-hg.loadbalancer.server.port=8002"
+    networks:
+      - opensim-network
+
+  # ----------------------------------------------------------------------------
+  # ADVANCED ASSET PARALLEL CAPS TEXTURE SERVER (AdvCapsServer)
+  # ----------------------------------------------------------------------------
+  advcaps:
+    image: opensim-robust:latest
+    command: dotnet AdvCapsServer.dll /app/config/advcaps.ini
+    volumes:
+      - asset-data:/app/asset_packs:ro
+    configs:
+      - source: robust_common
+        target: /etc/opensim/config/robust.common.ini
+      - source: advcaps_ini
+        target: /etc/opensim/config/advcaps.ini
+    depends_on:
+      - garnet
+      - db
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Map caps.oligrid.net to parallel texture port 8004
+        - "traefik.http.routers.advcaps.rule=Host(`caps.oligrid.net`)"
+        - "traefik.http.routers.advcaps.entrypoints=websecure"
+        - "traefik.http.routers.advcaps.tls=true"
+        - "traefik.http.routers.advcaps.tls.certresolver=cloudflare"
+        - "traefik.http.services.advcaps.loadbalancer.server.port=8004"
+    networks:
+      - opensim-network
+
+  # ----------------------------------------------------------------------------
+  # OPENSIM REGION SIMULATOR CONTAINER (Example Region)
+  # ----------------------------------------------------------------------------
+  opensim-region:
+    image: opensim-robust:latest
+    command: dotnet OpenSim.dll
+    environment:
+      - EXTERNAL_IP=AUTO # Automatically resolved to Node Public IP by entrypoint
+    ports:
+      # Bypass ingress routing mesh using host port mode.
+      # Essential for mapping UDP packets directly to the active simulator container.
+      - target: 9000
+        published: 9000
+        protocol: tcp
+        mode: host
+      - target: 9000
+        published: 9000
+        protocol: udp
+        mode: host
+    configs:
+      - source: opensim_ini
+        target: /etc/opensim/simulator/OpenSim.ini
+      - source: opensim_grid_common
+        target: /etc/opensim/simulator/GridCommon.ini
+      - source: opensim_regions
+        target: /etc/opensim/simulator/Regions.ini
+    secrets:
+      - db_password
+    depends_on:
+      - db
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - opensim-network
+
+# ------------------------------------------------------------------------------
+# CONFIGS (Docker Swarm Configs)
+# ------------------------------------------------------------------------------
+configs:
+  robust_common:
+    file: ./config/robust.common.ini
+  robust_asset:
+    file: ./config/robust.asset.ini
+  robust_inventory:
+    file: ./config/robust.inventory.ini
+  robust_grid:
+    file: ./config/robust.grid.ini
+  robust_user:
+    file: ./config/robust.user.ini
+  robust_hg:
+    file: ./config/robust.hg.ini
+  advcaps_ini:
+    file: ./config/advcaps.ini
+  # Simulator configs
+  opensim_ini:
+    file: ./config/opensim/OpenSim.ini
+  opensim_grid_common:
+    file: ./config/opensim/GridCommon.ini
+  opensim_regions:
+    file: ./config/opensim/Regions.ini
+  db_init_sql:
+    file: ./config/db/init.sql
+
+# ------------------------------------------------------------------------------
+# SECRETS (Docker Swarm Secrets)
+# ------------------------------------------------------------------------------
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  s3_access_key:
+    file: ./secrets/s3_access_key.txt
+  s3_secret_key:
+    file: ./secrets/s3_secret_key.txt
+  cloudflare_api_token:
+    file: ./secrets/cloudflare_api_token.txt
+
+# ------------------------------------------------------------------------------
+# VOLUMES & NETWORKS
+# ------------------------------------------------------------------------------
+volumes:
+  asset-data:
+    driver: local
+  garnet-data:
+    driver: local
+  traefik-certificates:
+    driver: local
+
+networks:
+  opensim-network:
+    driver: overlay
+    attachable: true
