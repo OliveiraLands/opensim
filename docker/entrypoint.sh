@@ -25,8 +25,74 @@ fi
 # ----------------------------------------------------------------------------
 # OPENSIM SIMULATOR CONFIGURATION
 # ----------------------------------------------------------------------------
-if [ -d "/etc/opensim/simulator" ]; then
-    echo "Configuring OpenSim Region Simulator..."
+if [ -n "$OPENSIM_REGION_NAME" ]; then
+    echo "Creating dynamic region files from environment variables..."
+    
+    # 1. Create OpenSim.ini
+    cat <<EOF > /app/OpenSim.ini
+[Startup]
+    Include-Architecture = "config-include/GridHypergrid.ini"
+    console = "Basic"
+EOF
+
+    # 2. Create GridCommon.ini
+    mkdir -p /app/config-include
+    cat <<EOF > /app/config-include/GridCommon.ini
+[DatabaseService]
+    StorageProvider = "OpenSim.Data.MySQL.dll"
+    ConnectionString = "Data Source=db;Database=${OPENSIM_DB_NAME};User ID=${OPENSIM_DB_USER};Password=${DB_PASSWORD};Old Guids=true;SslMode=None;"
+
+[AssetService]
+    DefaultAssetLoader = "OpenSim.Framework.AssetLoader.Filesystem.dll"
+    AssetLoaderArgs = "assets/AssetSets.xml"
+    AssetServerURI = "https://asset.oligrid.net"
+
+[InventoryService]
+    InventoryServerURI = "https://inventory.oligrid.net"
+
+[GridInfo]
+    GridInfoURI = "https://grid.oligrid.net"
+
+[GridService]
+    GridServerURI = "https://private-grid.oligrid.net"
+    Gatekeeper = "https://hg.oligrid.net"
+
+[EstateService]
+    EstateServerURI = "https://private-user.oligrid.net"
+
+[AvatarService]
+    AvatarServerURI = "https://private-user.oligrid.net"
+
+[PresenceService]
+    PresenceServerURI = "https://private-user.oligrid.net"
+
+[UserAccountService]
+    UserAccountServerURI = "https://private-user.oligrid.net"
+
+[GridUserService]
+    GridUserServerURI = "https://private-user.oligrid.net"
+
+[FriendsService]
+    FriendsServerURI = "https://private-user.oligrid.net"
+
+[Messaging]
+    Gatekeeper = "https://hg.oligrid.net"
+EOF
+
+    # 3. Create Regions.ini
+    mkdir -p /app/Regions
+    cat <<EOF > /app/Regions/Regions.ini
+[${OPENSIM_REGION_NAME}]
+    RegionUUID = "${OPENSIM_REGION_UUID}"
+    Location = "${OPENSIM_REGION_LOC}"
+    InternalAddress = "0.0.0.0"
+    InternalPort = 9000
+    AllowAlternatePorts = False
+    ExternalAddress = "\${EXTERNAL_IP}"
+EOF
+
+elif [ -d "/etc/opensim/simulator" ]; then
+    echo "Configuring OpenSim Region Simulator from config mounts..."
     
     # Copy main simulator ini
     if [ -f "/etc/opensim/simulator/OpenSim.ini" ]; then
