@@ -283,6 +283,20 @@
     ; S3Region = "us-east-1"
     ; S3SyncInterval = 10
 
+    ;; =====================================================================
+    ;; Advanced Asset Parallel CAPS Texture Server (AdvCapsServer)
+    ;; =====================================================================
+    ;; Section for configuring the lightweight parallel texture server (AdvCapsServer.exe).
+    ;; This service reads PackFiles directly and serves JPEG2000 textures for viewer CAPS HTTP GET requests,
+    ;; and optionally caches assets in Microsoft Garnet or Redis.
+    ;;
+    ; [CAPSTextureServer]
+    ;    Port = 8004
+    ;    Host = "0.0.0.0"
+    ;    Verbose = false
+    ;    UseRedis = false
+    ;    RedisConnectionString = "localhost:6379,password=testpassword,abortConnect=false"
+    ;    RedisTTL = 86400
 
     ; Allow maptile assets to remotely deleted by remote calls to the asset service.
     ; There is no harm in having this as false - it just means that historical maptile assets are not deleted.

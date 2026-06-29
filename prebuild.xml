@@ -633,19 +633,22 @@
           <Exclude name="obj" pattern="obj"/>
           <Exclude name="Tests" pattern="Tests"/>
           <Exclude name="Diagnostics" pattern="Diagnostics"/>
+          <Exclude name="AdvCapsServer" pattern="AdvCapsServer"/>
         </Match>
       </Files>
     </Project>
 
-    <Project name="OpenSim.Services.AdvancedAssetService.Tests" path="OpenSim/Services/AdvancedAssetService/Tests" type="Library">
+    <Project name="OpenSim.Services.AdvancedAssetService.Tests" path="OpenSim/Services/AdvancedAssetService/Tests" type="Exe">
       <Configuration name="Debug">
         <Options>
           <OutputPath>../../../../bin/</OutputPath>
+          <StartupObject>OpenSim.Services.AdvancedAssetService.Tests.Program</StartupObject>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../../../bin/</OutputPath>
+          <StartupObject>OpenSim.Services.AdvancedAssetService.Tests.Program</StartupObject>
         </Options>
       </Configuration>
 
@@ -655,7 +658,10 @@
       <Reference name="OpenSim.Framework"/>
       <Reference name="OpenSim.Services.Interfaces"/>
       <Reference name="OpenSim.Services.AdvancedAssetService"/>
+      <Reference name="OpenSim.Services.AdvancedAssetService.AdvCapsServer"/>
+      <Reference name="OpenSim.Services.FSAssetService"/>
       <Reference name="Nini"/>
+      <Reference name="log4net"/>
       <Reference name="nunit.framework"/>
       <PackageReference name="Microsoft.NET.Test.Sdk" version="17.8.0"/>
       <PackageReference name="NUnit3TestAdapter" version="4.5.0"/>
@@ -687,6 +693,35 @@
       <Reference name="System.Data.SQLite"/>
       <Reference name="Nini"/>
       <Reference name="log4net"/>
+      <Files>
+        <Match pattern="*.cs" recurse="true">
+          <Exclude name="obj" pattern="obj"/>
+        </Match>
+      </Files>
+    </Project>
+
+    <Project name="OpenSim.Services.AdvancedAssetService.AdvCapsServer" path="OpenSim/Services/AdvancedAssetService/AdvCapsServer" type="Exe" assemblyName="AdvCapsServer">
+      <Configuration name="Debug">
+        <Options>
+          <OutputPath>../../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+      <Configuration name="Release">
+        <Options>
+          <OutputPath>../../../../bin/</OutputPath>
+        </Options>
+      </Configuration>
+
+      <ReferencePath>../../../../bin/</ReferencePath>
+      <Reference name="OpenMetaverseTypes"/>
+      <Reference name="OpenMetaverse"/>
+      <Reference name="OpenSim.Framework"/>
+      <Reference name="OpenSim.Services.AdvancedAssetService"/>
+      <Reference name="OpenSim.Services.Interfaces"/>
+      <Reference name="System.Data.SQLite"/>
+      <Reference name="Nini"/>
+      <Reference name="log4net"/>
+      <PackageReference name="StackExchange.Redis" version="2.8.0"/>
       <Files>
         <Match pattern="*.cs" recurse="true">
           <Exclude name="obj" pattern="obj"/>
