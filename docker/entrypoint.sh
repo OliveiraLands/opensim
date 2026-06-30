@@ -40,7 +40,7 @@ EOF
     cat <<EOF > /app/config-include/GridCommon.ini
 [DatabaseService]
     StorageProvider = "OpenSim.Data.MySQL.dll"
-    ConnectionString = "Data Source=db;Database=${OPENSIM_DB_NAME};User ID=${OPENSIM_DB_USER};Password=${DB_PASSWORD};Old Guids=true;SslMode=None;"
+    ConnectionString = "Data Source=db;Port=3307;Database=${OPENSIM_DB_NAME};User ID=${OPENSIM_DB_USER};Password=${DB_PASSWORD};Old Guids=true;SslMode=None;"
 
 [AssetService]
     DefaultAssetLoader = "OpenSim.Framework.AssetLoader.Filesystem.dll"

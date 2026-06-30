@@ -43,8 +43,9 @@ services:
   # ----------------------------------------------------------------------------
   db:
     image: mariadb:10.11
+    command: --port=3307
     ports:
-      - "3306:3306" # Exposes DB port for external management tools
+      - "3307:3307" # Exposes DB port for external management tools
     environment:
       - MARIADB_DATABASE=os_oligridnet
       - MARIADB_USER=osuser
