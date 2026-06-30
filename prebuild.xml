@@ -643,12 +643,20 @@
         <Options>
           <OutputPath>../../../../bin/</OutputPath>
           <StartupObject>OpenSim.Services.AdvancedAssetService.Tests.Program</StartupObject>
+          <GenerateProgramFile>false</GenerateProgramFile>
+          <GenerateDependencyFile>true</GenerateDependencyFile>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+          <UseCommonOutputDirectory>false</UseCommonOutputDirectory>
         </Options>
       </Configuration>
       <Configuration name="Release">
         <Options>
           <OutputPath>../../../../bin/</OutputPath>
           <StartupObject>OpenSim.Services.AdvancedAssetService.Tests.Program</StartupObject>
+          <GenerateProgramFile>false</GenerateProgramFile>
+          <GenerateDependencyFile>true</GenerateDependencyFile>
+          <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+          <UseCommonOutputDirectory>false</UseCommonOutputDirectory>
         </Options>
       </Configuration>
 
@@ -662,9 +670,10 @@
       <Reference name="OpenSim.Services.FSAssetService"/>
       <Reference name="Nini"/>
       <Reference name="log4net"/>
-      <Reference name="nunit.framework"/>
       <PackageReference name="Microsoft.NET.Test.Sdk" version="17.8.0"/>
       <PackageReference name="NUnit3TestAdapter" version="4.5.0"/>
+      <PackageReference name="NUnit" version="3.14.0"/>
+      <PackageReference name="Microsoft.Extensions.DependencyModel" version="8.0.1"/>
       <Files>
         <Match pattern="*.cs" recurse="true">
           <Exclude name="obj" pattern="obj"/>

@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <GenerateProgramFile>false</GenerateProgramFile>
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <UseCommonOutputDirectory>false</UseCommonOutputDirectory>
+  </PropertyGroup>
+</Project>
