@@ -9,7 +9,8 @@
     <AssemblyName>OpenSim.Services.AdvancedAssetService.Tests</AssemblyName>
     <Deterministic>true</Deterministic>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
-    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
     <EnableDefaultItems>false</EnableDefaultItems>
     <GenerateProgramFile>false</GenerateProgramFile>
@@ -26,7 +27,7 @@
     <FileAlignment>4096</FileAlignment>
     <Optimize>False</Optimize>
     <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
-    <UseCommonOutputDirectory>True</UseCommonOutputDirectory>
+    <UseCommonOutputDirectory>False</UseCommonOutputDirectory>
     <AppendTargetFrameworkToOutputPath>False</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>False</AppendRuntimeIdentifierToOutputPath>
     <OutputPath>..\..\..\..\bin\</OutputPath>
@@ -49,7 +50,7 @@
     <FileAlignment>4096</FileAlignment>
     <Optimize>True</Optimize>
     <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
-    <UseCommonOutputDirectory>True</UseCommonOutputDirectory>
+    <UseCommonOutputDirectory>False</UseCommonOutputDirectory>
     <AppendTargetFrameworkToOutputPath>False</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>False</AppendRuntimeIdentifierToOutputPath>
     <OutputPath>..\..\..\..\bin\</OutputPath>
@@ -64,33 +65,30 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyModel" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="log4net" >
       <Name>log4net</Name>
-      <HintPath>C:\home\dev\oliveiralands\opensim\bin\log4net.dll</HintPath>
-      <Private>False</Private>
+      <HintPath>..\..\..\..\bin\log4net.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Nini" >
       <Name>Nini</Name>
-      <HintPath>C:\home\dev\oliveiralands\opensim\bin\Nini.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="nunit.framework" >
-      <Name>nunit.framework</Name>
-      <HintPath>C:\home\dev\oliveiralands\opensim\bin\nunit.framework.dll</HintPath>
-      <Private>False</Private>
+      <HintPath>..\..\..\..\bin\Nini.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="OpenMetaverse" >
       <Name>OpenMetaverse</Name>
-      <HintPath>C:\home\dev\oliveiralands\opensim\bin\OpenMetaverse.dll</HintPath>
-      <Private>False</Private>
+      <HintPath>..\..\..\..\bin\OpenMetaverse.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="OpenMetaverseTypes" >
       <Name>OpenMetaverseTypes</Name>
-      <HintPath>C:\home\dev\oliveiralands\opensim\bin\OpenMetaverseTypes.dll</HintPath>
-      <Private>False</Private>
+      <HintPath>..\..\..\..\bin\OpenMetaverseTypes.dll</HintPath>
+      <Private>True</Private>
     </Reference>
   </ItemGroup>
 

@@ -75,6 +75,8 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             var packManager = packManagerField.GetValue(service);
             Assert.That(packManager, Is.Not.Null);
 
+            WaitForPendingWrites(packManager);
+
             // Call Defragment
             var defragMethod = packManager.GetType().GetMethod("Defragment");
             Assert.That(defragMethod, Is.Not.Null);
@@ -137,6 +139,8 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             var packManager = packManagerField.GetValue(service);
             Assert.That(packManager, Is.Not.Null);
 
+            WaitForPendingWrites(packManager);
+
             // Set uuid2 as suspicious
             var setSuspMethod = packManager.GetType().GetMethod("SetSuspiciousAssets");
             Assert.That(setSuspMethod, Is.Not.Null);
@@ -183,6 +187,8 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var packManager = packManagerField.GetValue(service);
 
+            WaitForPendingWrites(packManager);
+
             // Mark uuid1 as suspicious
             var setSuspMethod = packManager.GetType().GetMethod("SetSuspiciousAssets");
             setSuspMethod.Invoke(packManager, new object[] { new string[] { uuid1.ToString() } });
@@ -205,6 +211,25 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             if (Directory.Exists("test_asset_packs"))
             {
                 try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+        }
+
+        private void WaitForPendingWrites(object packManager)
+        {
+            var cacheField = packManager.GetType().GetField("m_PendingWritesCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.That(cacheField, Is.Not.Null);
+            var cache = (System.Collections.IDictionary)cacheField.GetValue(packManager);
+            Assert.That(cache, Is.Not.Null);
+
+            int retries = 50; // 5 seconds max
+            while (cache.Count > 0 && retries > 0)
+            {
+                System.Threading.Thread.Sleep(100);
+                retries--;
+            }
+            if (cache.Count > 0)
+            {
+                throw new Exception("Timeout waiting for pending writes to complete.");
             }
         }
     }
