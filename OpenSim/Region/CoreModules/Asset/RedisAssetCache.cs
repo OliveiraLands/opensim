@@ -67,8 +67,8 @@ namespace OpenSim.Region.CoreModules.Asset
                 
                 // Configura opções de conexão com timeout e auto-reconnect
                 var options = ConfigurationOptions.Parse(m_ConnectionString);
-                options.ConnectTimeout = 5000;
-                options.SyncTimeout = 5000;
+                options.ConnectTimeout = 1000;
+                options.SyncTimeout = 1000;
                 options.AbortOnConnectFail = false; // Não aborta para permitir reconexão automática em segundo plano
                 
                 m_Redis = ConnectionMultiplexer.Connect(options);

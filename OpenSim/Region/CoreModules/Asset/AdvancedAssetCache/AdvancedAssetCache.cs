@@ -72,7 +72,7 @@ namespace OpenSim.Region.CoreModules.Asset
         public bool Get(string id, out AssetBase asset)
         {
             asset = Get(id);
-            return asset != null;
+            return true;
         }
 
         public AssetBase Get(string id)

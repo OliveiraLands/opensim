@@ -767,6 +767,8 @@
     ;;   "<url>" -- capability enabled and served by some other server
     ;;
     ; These are enabled by default to localhost. Change if you see fit.
+    ; Example of redirecting GetTexture to a secure parallel CAPS texture server (AdvCapsServer) running under HTTPS (port 443):
+    ; Cap_GetTexture = "https://caps.example.com/CAPS/GetTexture/"
     Cap_GetTexture = "localhost"
     Cap_GetMesh = "localhost"
     Cap_AvatarPickerSearch = "localhost"
