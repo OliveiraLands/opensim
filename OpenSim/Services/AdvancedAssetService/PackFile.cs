@@ -62,6 +62,7 @@ namespace OpenSim.Services.AdvancedAssetService
         private object m_Lock = new object();
         private HashSet<string> m_SuspiciousCache = null;
         private bool m_Disposed = false;
+        private volatile int m_PendingDuplicateLinksCount = -1;
 
         public int CurrentPackID
         {
@@ -220,6 +221,33 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
                 ExecuteNonQuery("CREATE TABLE IF NOT EXISTS suspicious_assets (uuid TEXT PRIMARY KEY COLLATE NOCASE, flagged_at INTEGER)");
                 LoadConfig();
+                
+                // Check if duplicate links migration has completed and initialize pending count
+                try
+                {
+                    using (var cmd = m_Connection.CreateCommand())
+                    {
+                        cmd.CommandText = "SELECT value FROM config WHERE key = 'duplicate_links_migrated'";
+                        string migrated = Convert.ToString(cmd.ExecuteScalar() ?? "");
+                        if (migrated == "true")
+                        {
+                            m_PendingDuplicateLinksCount = 0;
+                        }
+                        else
+                        {
+                            cmd.CommandText = "SELECT COUNT(*) FROM asset_map";
+                            long totalAssets = Convert.ToInt64(cmd.ExecuteScalar() ?? 0L);
+                            cmd.CommandText = "SELECT COUNT(*) FROM index_assets";
+                            long uniqueBlocks = Convert.ToInt64(cmd.ExecuteScalar() ?? 0L);
+                            m_PendingDuplicateLinksCount = (int)Math.Max(0, totalAssets - uniqueBlocks);
+                        }
+                    }
+                }
+                catch
+                {
+                    m_PendingDuplicateLinksCount = -1;
+                }
+
                 string activePackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
                 PerformCrashRecovery(activePackPath);
             }
@@ -454,6 +482,11 @@ namespace OpenSim.Services.AdvancedAssetService
                             physicalUuids.Add(normalizedDupUuid);
                             migratedLinksCount++;
                         }
+
+                        if (m_PendingDuplicateLinksCount > 0)
+                        {
+                            m_PendingDuplicateLinksCount--;
+                        }
                     }
                 }
 
@@ -467,6 +500,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     }
                 }
 
+                m_PendingDuplicateLinksCount = 0;
                 m_log.Info(string.Format("[AAS Migration]: Migration completed. Secured {0} missing duplicate links across {1} unique hashes in the pack files.", migratedLinksCount, processedHashes));
             }
             catch (Exception)
@@ -1477,6 +1511,8 @@ namespace OpenSim.Services.AdvancedAssetService
                     }
                 }
                 catch { stats["TotalUnsyncedAssets"] = -1L; }
+
+                stats["PendingDuplicateLinks"] = (long)m_PendingDuplicateLinksCount;
             }
 
             return stats;

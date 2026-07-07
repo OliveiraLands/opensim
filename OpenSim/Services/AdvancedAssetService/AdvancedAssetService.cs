@@ -2635,6 +2635,16 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Output(string.Format("  Total Unique Assets (links):     {0}", stats["TotalUniqueAssets"]));
             MainConsole.Instance.Output(string.Format("  Total Unique Data Blocks (dedup): {0}", stats["TotalUniqueDataBlocks"]));
             
+            long pendingLinks = stats.ContainsKey("PendingDuplicateLinks") ? (long)stats["PendingDuplicateLinks"] : -1L;
+            if (pendingLinks == -1L)
+            {
+                MainConsole.Instance.Output("  Pending Duplicate Links (not in pack): Calculating...");
+            }
+            else
+            {
+                MainConsole.Instance.Output(string.Format("  Pending Duplicate Links (not in pack): {0}", pendingLinks));
+            }
+            
             // Calculate deduplication ratio
             long totalAssets = (long)stats["TotalUniqueAssets"];
             long uniqueData = (long)stats["TotalUniqueDataBlocks"];
