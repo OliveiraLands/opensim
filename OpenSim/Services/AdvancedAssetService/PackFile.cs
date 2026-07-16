@@ -1682,18 +1682,11 @@ namespace OpenSim.Services.AdvancedAssetService
 
                                 bool isMetadataCorrupt = false;
 
-                                if (dbHash == null)
+                                // We ONLY verify Type and Name if the UUID is still mapped to this hash.
+                                // If the UUID is mapped to a DIFFERENT hash, it's a normal overwrite/update, not a corruption.
+                                // If the UUID is no longer in the DB, it's a deleted asset reference, not a physical corruption.
+                                if (dbHash != null && dbHash.Equals(entry.Hash, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    isMetadataCorrupt = true;
-                                    output($"[ERROR] Metadata mismatch: UUID {fileUuid} in physical record for hash {entry.Hash} is not registered in database asset_map.");
-                                }
-                                else
-                                {
-                                    if (!dbHash.Equals(entry.Hash, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        isMetadataCorrupt = true;
-                                        output($"[ERROR] Hash mismatch: Physical record has hash {entry.Hash}, but DB maps UUID {fileUuid} to hash {dbHash}.");
-                                    }
                                     if (dbType != (int)fileType)
                                     {
                                         isMetadataCorrupt = true;
@@ -1703,6 +1696,30 @@ namespace OpenSim.Services.AdvancedAssetService
                                     {
                                         isMetadataCorrupt = true;
                                         output($"[ERROR] Name mismatch for UUID {fileUuid}! DB Name: '{dbName}', Physical Name: '{fileName}'");
+                                    }
+                                }
+
+                                // We also verify that all active mappings for this hash have the same type
+                                if (!isMetadataCorrupt)
+                                {
+                                    using (var verifyCmd = m_Connection.CreateCommand())
+                                    {
+                                        verifyCmd.CommandText = "SELECT uuid, type FROM asset_map WHERE hash = ?";
+                                        verifyCmd.Parameters.AddWithValue(null, entry.Hash);
+                                        using (var verifyReader = verifyCmd.ExecuteReader())
+                                        {
+                                            while (verifyReader.Read())
+                                            {
+                                                string mappedUuid = verifyReader.IsDBNull(0) ? string.Empty : verifyReader.GetString(0);
+                                                int mappedType = verifyReader.IsDBNull(1) ? -1 : verifyReader.GetInt32(1);
+                                                if (mappedType != -1 && mappedType != (int)fileType)
+                                                {
+                                                    isMetadataCorrupt = true;
+                                                    output($"[ERROR] Type mismatch for mapped UUID {mappedUuid} pointing to hash {entry.Hash}! DB Type: {mappedType}, Physical Type: {fileType}");
+                                                    break;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
