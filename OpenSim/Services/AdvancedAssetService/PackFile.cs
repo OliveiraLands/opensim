@@ -1632,13 +1632,15 @@ namespace OpenSim.Services.AdvancedAssetService
                                 }
 
                                 ushort version = br.ReadUInt16();
-                                br.ReadBytes(16); // UUID
-                                br.ReadSByte(); // Type
+                                byte[] uuidBytes = br.ReadBytes(16); // UUID
+                                UUID fileUuid = new UUID(uuidBytes, 0);
+                                sbyte fileType = br.ReadSByte(); // Type
                                 if (version >= 2) br.ReadInt64(); // Created
                                 
                                 // Name string was written as: ushort (length) + bytes
                                 ushort nameLen = br.ReadUInt16();
-                                br.ReadBytes(nameLen); // Skip Name
+                                byte[] nameBytes = br.ReadBytes(nameLen);
+                                string fileName = Encoding.UTF8.GetString(nameBytes);
                                 
                                 int dataLen = br.ReadInt32();
                                 if (dataLen != entry.Length)
@@ -1654,6 +1656,59 @@ namespace OpenSim.Services.AdvancedAssetService
                                 {
                                     corruptedAssets++;
                                     output($"[ERROR] Hash mismatch! Expected {entry.Hash}, got {computedHash}");
+                                    continue;
+                                }
+
+                                // 3. Verify physical metadata (UUID, type, name) against database mapping
+                                string normalizedUuid = NormalizeUUID(fileUuid.ToString());
+                                string dbHash = null;
+                                int dbType = -1;
+                                string dbName = null;
+
+                                using (var verifyCmd = m_Connection.CreateCommand())
+                                {
+                                    verifyCmd.CommandText = "SELECT hash, type, name FROM asset_map WHERE uuid = ? LIMIT 1";
+                                    verifyCmd.Parameters.AddWithValue(null, normalizedUuid);
+                                    using (var verifyReader = verifyCmd.ExecuteReader())
+                                    {
+                                        if (verifyReader.Read())
+                                        {
+                                            dbHash = verifyReader.IsDBNull(0) ? null : verifyReader.GetString(0);
+                                            dbType = verifyReader.IsDBNull(1) ? -1 : verifyReader.GetInt32(1);
+                                            dbName = verifyReader.IsDBNull(2) ? string.Empty : verifyReader.GetString(2);
+                                        }
+                                    }
+                                }
+
+                                bool isMetadataCorrupt = false;
+
+                                if (dbHash == null)
+                                {
+                                    isMetadataCorrupt = true;
+                                    output($"[ERROR] Metadata mismatch: UUID {fileUuid} in physical record for hash {entry.Hash} is not registered in database asset_map.");
+                                }
+                                else
+                                {
+                                    if (!dbHash.Equals(entry.Hash, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        isMetadataCorrupt = true;
+                                        output($"[ERROR] Hash mismatch: Physical record has hash {entry.Hash}, but DB maps UUID {fileUuid} to hash {dbHash}.");
+                                    }
+                                    if (dbType != (int)fileType)
+                                    {
+                                        isMetadataCorrupt = true;
+                                        output($"[ERROR] Type mismatch for UUID {fileUuid}! DB Type: {dbType}, Physical Type: {fileType}");
+                                    }
+                                    if (dbName != fileName)
+                                    {
+                                        isMetadataCorrupt = true;
+                                        output($"[ERROR] Name mismatch for UUID {fileUuid}! DB Name: '{dbName}', Physical Name: '{fileName}'");
+                                    }
+                                }
+
+                                if (isMetadataCorrupt)
+                                {
+                                    corruptedAssets++;
                                 }
                                 else
                                 {

@@ -108,7 +108,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-asset", "aas export-asset <ID> <path>", "Export an asset to a file", HandleExportAsset);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-asset", "aas import-asset <path> <type> <name>", "Import an asset from a file", HandleImportAsset);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas import-legacy", "aas import-legacy <path>", "Bulk import assets from FSAssetService structure", HandleImportLegacy);
-            MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-legacy", "aas export-legacy <path>", "Bulk export assets to FSAssetService structure", HandleExportLegacy);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas export-legacy", "aas export-legacy <path> [--overwrite]", "Bulk export assets to FSAssetService structure (only exports non-existing ones by default)", HandleExportLegacy);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas search-content", "aas search-content <string>", "Search assets for content", HandleSearchContent);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas verify", "aas verify", "Verify that all inventory items exist in Advanced Asset Service", HandleVerify);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas status", "aas status", "Show useful statistics and status of Advanced Asset Service", HandleStatus);
@@ -2335,14 +2335,24 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             if (args.Length < 3)
             {
-                MainConsole.Instance.Output("Syntax: aas export-legacy <path>");
+                MainConsole.Instance.Output("Syntax: aas export-legacy <path> [--overwrite]");
                 return;
             }
             string basePath = args[2];
+            
+            bool overwrite = false;
+            for (int i = 3; i < args.Length; i++)
+            {
+                if (args[i].Equals("--overwrite", StringComparison.OrdinalIgnoreCase))
+                {
+                    overwrite = true;
+                }
+            }
+
             if (!Directory.Exists(basePath)) Directory.CreateDirectory(basePath);
 
             var assets = m_PackManager.GetAllAssets();
-            MainConsole.Instance.Output($"Exporting {assets.Count} assets to FSAsset compatible format (Hash.gz)...");
+            MainConsole.Instance.Output($"Exporting {assets.Count} assets to FSAsset compatible format (Hash.gz) {(overwrite ? "(overwrite mode)" : "(skipping existing files)")}...");
 
             int count = 0;
             HashSet<string> exportedHashes = new HashSet<string>();
@@ -2354,17 +2364,20 @@ namespace OpenSim.Services.AdvancedAssetService
             }
             else
             {
-                string dataDir = Path.Combine(basePath, "data");
-                if (Directory.Exists(dataDir))
+                if (!overwrite)
                 {
-                    try
+                    string dataDir = Path.Combine(basePath, "data");
+                    if (Directory.Exists(dataDir))
                     {
-                        foreach (string file in SafeGetFiles(dataDir))
+                        try
                         {
-                            exportedHashes.Add(Path.GetFileNameWithoutExtension(file));
+                            foreach (string file in SafeGetFiles(dataDir))
+                            {
+                                exportedHashes.Add(Path.GetFileNameWithoutExtension(file));
+                            }
                         }
+                        catch {}
                     }
-                    catch {}
                 }
             }
 
@@ -2391,20 +2404,25 @@ namespace OpenSim.Services.AdvancedAssetService
                         // 1. Physical Export (Deduplicated)
                         if (!exportedHashes.Contains(meta.Hash))
                         {
-                            byte[] data = m_PackManager.GetAssetData(meta.UUID, out _, out _);
-                            if (data != null)
+                            string relPath = HashToPath(meta.Hash);
+                            string fullPath = Path.Combine(basePath, "data", relPath + ".gz");
+                            
+                            bool shouldWrite = overwrite || !File.Exists(fullPath);
+                            if (shouldWrite)
                             {
-                                string relPath = HashToPath(meta.Hash);
-                                string fullPath = Path.Combine(basePath, "data", relPath + ".gz");
-                                Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
-
-                                using (FileStream fs = new FileStream(fullPath, FileMode.Create))
-                                using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                                byte[] data = m_PackManager.GetAssetData(meta.UUID, out _, out _);
+                                if (data != null)
                                 {
-                                    gz.Write(data, 0, data.Length);
+                                    Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
+
+                                    using (FileStream fs = new FileStream(fullPath, FileMode.Create))
+                                    using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                                    {
+                                        gz.Write(data, 0, data.Length);
+                                    }
                                 }
-                                exportedHashes.Add(meta.Hash);
                             }
+                            exportedHashes.Add(meta.Hash);
                         }
 
                         // 2. Metadata Export (SQL)

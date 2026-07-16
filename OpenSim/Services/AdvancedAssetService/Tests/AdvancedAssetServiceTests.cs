@@ -214,6 +214,87 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             }
         }
 
+        [Test]
+        public void TestVerifyIntegrityDetectsMismatches()
+        {
+            if (Directory.Exists("test_verify_packs"))
+            {
+                try { Directory.Delete("test_verify_packs", true); } catch {}
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", "test_verify_packs");
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID uuid = UUID.Random();
+                byte[] data = new byte[] { 0x12, 0x34, 0x56, 0x78 };
+                AssetBase asset = new AssetBase(uuid, "Original Name", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = data };
+                
+                service.Store(asset);
+
+                var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(packManagerField, Is.Not.Null);
+                var packManager = packManagerField.GetValue(service);
+                Assert.That(packManager, Is.Not.Null);
+
+                WaitForPendingWrites(packManager);
+
+                // 1. Run verify integrity: it should report perfect status (no errors)
+                List<string> outputs = new List<string>();
+                var verifyMethod = packManager.GetType().GetMethod("VerifyIntegrity", new Type[] { typeof(Action<string>) });
+                Assert.That(verifyMethod, Is.Not.Null);
+                
+                verifyMethod.Invoke(packManager, new object[] { new Action<string>(msg => outputs.Add(msg)) });
+
+                bool hasErrors = outputs.Exists(line => line.Contains("[ERROR]"));
+                if (hasErrors)
+                {
+                    Assert.Fail("Expected no integrity errors initially, but got:\n" + string.Join("\n", outputs));
+                }
+
+                // 2. Tamper with the SQLite database to change the name of the asset
+                var connectionField = packManager.GetType().GetField("m_Connection", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(connectionField, Is.Not.Null);
+                var connection = (System.Data.IDbConnection)connectionField.GetValue(packManager);
+                Assert.That(connection, Is.Not.Null);
+
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = $"UPDATE asset_map SET name = 'Tampered Name' WHERE uuid = '{uuid.ToString().ToLower().Replace("-", "")}'";
+                    cmd.ExecuteNonQuery();
+                }
+
+                // Run verify integrity again: it should report a Name Mismatch error
+                outputs.Clear();
+                verifyMethod.Invoke(packManager, new object[] { new Action<string>(msg => outputs.Add(msg)) });
+
+                bool hasNameError = outputs.Exists(line => line.Contains("[ERROR] Name mismatch"));
+                Assert.That(hasNameError, Is.True, "Expected a Name mismatch error after database tampering.");
+
+                // 3. Tamper with the SQLite database to change the type of the asset
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = $"UPDATE asset_map SET type = {(int)AssetType.LSLText} WHERE uuid = '{uuid.ToString().ToLower().Replace("-", "")}'";
+                    cmd.ExecuteNonQuery();
+                }
+
+                // Run verify integrity again: it should report a Type Mismatch error
+                outputs.Clear();
+                verifyMethod.Invoke(packManager, new object[] { new Action<string>(msg => outputs.Add(msg)) });
+
+                bool hasTypeError = outputs.Exists(line => line.Contains("[ERROR] Type mismatch"));
+                Assert.That(hasTypeError, Is.True, "Expected a Type mismatch error after database tampering.");
+            }
+
+            // Cleanup
+            if (Directory.Exists("test_verify_packs"))
+            {
+                try { Directory.Delete("test_verify_packs", true); } catch {}
+            }
+        }
+
         private void WaitForPendingWrites(object packManager)
         {
             var cacheField = packManager.GetType().GetField("m_PendingWritesCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
