@@ -1515,10 +1515,39 @@ namespace OpenSim.Services.AdvancedAssetService
             int failed = 0;
             int notInFs = 0;
 
-            foreach (string uuidStr in missingUUIDs)
+            List<string> uuidsList = new List<string>(missingUUIDs);
+            int startIndex = m_PackManager.PromptResumeProgress("restore-from-log", logPath, uuidsList.Count, out bool resumeProgress);
+            if (!resumeProgress)
             {
+                m_PackManager.StartCommandProgress("restore-from-log", logPath, uuidsList.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:restore-from-log:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 3)
+                    {
+                        int.TryParse(parts[0], out restored);
+                        int.TryParse(parts[1], out failed);
+                        int.TryParse(parts[2], out notInFs);
+                    }
+                }
+            }
+
+            for (int i = startIndex; i < uuidsList.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance?.Output("Restore from log aborted by user.");
+                    return;
+                }
+                string uuidStr = uuidsList[i];
+
                 if (m_PackManager.AssetExists(uuidStr))
                 {
+                    m_PackManager.UpdateCommandProgress("restore-from-log", i + 1);
                     continue;
                 }
 
@@ -1565,6 +1594,8 @@ namespace OpenSim.Services.AdvancedAssetService
                 {
                     m_log.WarnFormat("[ADVANCED ASSET SERVICE]: File for UUID {0} not found in FSAsset repository.", uuidStr);
                     notInFs++;
+                    m_PackManager.UpdateCommandProgress("restore-from-log", i + 1);
+                    m_PackManager.SetConfig("cmd_state:restore-from-log:metadata", string.Format("{0},{1},{2}", restored, failed, notInFs));
                     continue;
                 }
 
@@ -1605,8 +1636,12 @@ namespace OpenSim.Services.AdvancedAssetService
                     m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Failed to restore asset {0}: {1}", uuidStr, ex.Message));
                     failed++;
                 }
+
+                m_PackManager.UpdateCommandProgress("restore-from-log", i + 1);
+                m_PackManager.SetConfig("cmd_state:restore-from-log:metadata", string.Format("{0},{1},{2}", restored, failed, notInFs));
             }
 
+            m_PackManager.ClearCommandProgress("restore-from-log");
             MainConsole.Instance?.Output(string.Format("Restoration completed: {0} restored, {1} failed, {2} not found in FS.", restored, failed, notInFs));
         }
 
