@@ -345,6 +345,73 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             }
         }
 
+        [Test]
+        public void TestRestoreFromLog()
+        {
+            if (Directory.Exists("test_restore_log_packs"))
+            {
+                try { Directory.Delete("test_restore_log_packs", true); } catch {}
+            }
+            if (Directory.Exists("test_restore_log_fs"))
+            {
+                try { Directory.Delete("test_restore_log_fs", true); } catch {}
+            }
+            if (File.Exists("test_urma.log"))
+            {
+                try { File.Delete("test_urma.log"); } catch {}
+            }
+
+            // 1. Create a dummy log file
+            UUID missingUuid1 = UUID.Random();
+            UUID missingUuid2 = UUID.Random();
+            string logContent = $"2026-07-17 14:39:24 WARN  [InventoryAccessModule]: Could not find asset {missingUuid1} for item Test Item 1\n" +
+                                $"2026-07-17 14:39:25 WARN  [InventoryAccessModule]: Could not find asset {missingUuid2} for item Test Item 2\n";
+            File.WriteAllText("test_urma.log", logContent);
+
+            // 2. Create a dummy FSAsset folder with one of the assets named by UUID (normalized)
+            Directory.CreateDirectory("test_restore_log_fs");
+            string dataStr2 = "Restored Content 2";
+            byte[] dataBytes2 = System.Text.Encoding.UTF8.GetBytes(dataStr2);
+            string uuidFilePath = Path.Combine("test_restore_log_fs", missingUuid2.ToString().ToLower().Replace("-", "") + ".gz");
+            using (FileStream fs = new FileStream(uuidFilePath, FileMode.Create, FileAccess.Write))
+            using (System.IO.Compression.GZipStream gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Compress))
+            {
+                gz.Write(dataBytes2, 0, dataBytes2.Length);
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", "test_restore_log_packs");
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                var restoreMethod = typeof(AdvancedAssetService).GetMethod("HandleRestoreFromLog", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(restoreMethod, Is.Not.Null);
+
+                string[] args = new string[] { "aas", "restore-from-log", "test_urma.log", "test_restore_log_fs" };
+                restoreMethod.Invoke(service, new object[] { "aas", args });
+
+                // Verify that missingUuid2 (which was in FS named by UUID) was successfully restored!
+                AssetBase retrieved = service.Get(missingUuid2.ToString());
+                Assert.That(retrieved, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(retrieved.Data), Is.EqualTo(dataStr2));
+            }
+
+            // Cleanup
+            if (Directory.Exists("test_restore_log_packs"))
+            {
+                try { Directory.Delete("test_restore_log_packs", true); } catch {}
+            }
+            if (Directory.Exists("test_restore_log_fs"))
+            {
+                try { Directory.Delete("test_restore_log_fs", true); } catch {}
+            }
+            if (File.Exists("test_urma.log"))
+            {
+                try { File.Delete("test_urma.log"); } catch {}
+            }
+        }
+
         private void WaitForPendingWrites(object packManager)
         {
             var cacheField = packManager.GetType().GetField("m_PendingWritesCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

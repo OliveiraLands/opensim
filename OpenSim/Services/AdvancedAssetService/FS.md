@@ -31,6 +31,7 @@ O serviço pode ser gerenciado através do console do OpenSim usando o prefixo `
 * `aas defrag`: Desfragmenta os PackFiles descartando dados órfãos e liberando espaço em disco.
 * `aas optimize`: Executa otimização da base de dados SQLite (reconstrói os índices, atualiza estatísticas do query planner e roda VACUUM para reduzir o tamanho físico de index.db).
 * `aas compare <path>`: Compara os assets locais do AAS com uma pasta externa de assets legado.
+* `aas restore-from-log <log_path> <fs_path>`: Escaneia um arquivo de log (ex: Robust.log) buscando avisos de assets não encontrados e tenta importá-los automaticamente a partir da pasta FSAsset legada.
 * `aas sync-database`: Força a sincronização completa de todos os assets locais pendentes com o banco de dados da grid (Shadow Sync).
 * `aas sync-s3`: Força a sincronização imediata de todos os arquivos de pacotes de assets locais com o S3.
 

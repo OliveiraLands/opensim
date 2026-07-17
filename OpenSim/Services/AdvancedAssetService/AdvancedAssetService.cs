@@ -126,6 +126,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask> [<import_folder>] [--flag-suspicious]", "Scan inventories and region databases to identify used assets, importing missing ones and optionally flagging unused ones as suspicious", HandleScanUsedAssets);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas restore-from-log", "aas restore-from-log <log_path> <fs_path>", "Scan a log file for missing asset warnings and attempt to restore them from a FSAsset folder", HandleRestoreFromLog);
         }
 
         public virtual AssetBase Get(string id)
@@ -1416,6 +1417,197 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Output(string.Format("Successfully imported:          {0}", importedCount));
             MainConsole.Instance.Output(string.Format("Not found in IAR:              {0}", notFoundCount));
             MainConsole.Instance.Output(string.Format("Errors during Import:          {0}", errorCount));
+        }
+
+        private void HandleRestoreFromLog(string module, string[] args)
+        {
+            if (args.Length < 4)
+            {
+                MainConsole.Instance?.Output("Syntax: aas restore-from-log <log_path> <fs_path>");
+                return;
+            }
+            string logPath = args[2];
+            string fsPath = args[3];
+
+            if (!File.Exists(logPath))
+            {
+                MainConsole.Instance?.Output("Log file not found: " + logPath);
+                return;
+            }
+
+            if (!Directory.Exists(fsPath))
+            {
+                MainConsole.Instance?.Output("FSAsset path not found: " + fsPath);
+                return;
+            }
+
+            MainConsole.Instance?.Output("Scanning log file for missing assets...");
+            HashSet<string> missingUUIDs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var uuidRegex = new System.Text.RegularExpressions.Regex(@"\b[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\b");
+
+            foreach (string line in File.ReadLines(logPath))
+            {
+                string lowerLine = line.ToLower();
+                if (lowerLine.Contains("could not find asset") || lowerLine.Contains("missing") || lowerLine.Contains("not found") || lowerLine.Contains("failed to load") || lowerLine.Contains("error [archiver]"))
+                {
+                    var matches = uuidRegex.Matches(line);
+                    foreach (System.Text.RegularExpressions.Match match in matches)
+                    {
+                        missingUUIDs.Add(match.Value);
+                    }
+                }
+            }
+
+            if (missingUUIDs.Count == 0)
+            {
+                MainConsole.Instance?.Output("No missing asset UUIDs found in the log file.");
+                return;
+            }
+
+            MainConsole.Instance?.Output(string.Format("Found {0} unique missing asset UUIDs in log.", missingUUIDs.Count));
+
+            MainConsole.Instance?.Output("Scanning external FS folder for asset files...");
+            string[] allFiles;
+            try
+            {
+                allFiles = SafeGetFiles(fsPath).ToArray();
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance?.Output("Error scanning folder: " + ex.Message);
+                return;
+            }
+
+            MainConsole.Instance?.Output(string.Format("Found {0} files in external folder. Indexing...", allFiles.Length));
+            var filesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string file in allFiles)
+            {
+                string filename = Path.GetFileName(file);
+                string normName = filename.ToLower().Replace("-", "");
+                filesByName[normName] = file;
+
+                if (filename.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+                {
+                    string withoutGz = filename.Substring(0, filename.Length - 3);
+                    string normWithoutGz = withoutGz.ToLower().Replace("-", "");
+                    filesByName[normWithoutGz] = file;
+
+                    if (withoutGz.Contains("."))
+                    {
+                        string uuidPart = withoutGz.Split('.')[0];
+                        string normUuidPart = uuidPart.ToLower().Replace("-", "");
+                        filesByName[normUuidPart] = file;
+                    }
+                }
+                
+                string withoutExt = Path.GetFileNameWithoutExtension(file);
+                string normWithoutExt = withoutExt.ToLower().Replace("-", "");
+                filesByName[normWithoutExt] = file;
+                if (withoutExt.Contains("."))
+                {
+                    string uuidPart = withoutExt.Split('.')[0];
+                    string normUuidPart = uuidPart.ToLower().Replace("-", "");
+                    filesByName[normUuidPart] = file;
+                }
+            }
+
+            int restored = 0;
+            int failed = 0;
+            int notInFs = 0;
+
+            foreach (string uuidStr in missingUUIDs)
+            {
+                if (m_PackManager.AssetExists(uuidStr))
+                {
+                    continue;
+                }
+
+                string normUuid = uuidStr.ToLower().Replace("-", "");
+                string matchedFilePath = null;
+
+                // 1. Try to find directly by UUID
+                if (filesByName.TryGetValue(normUuid, out string fileByUuid))
+                {
+                    matchedFilePath = fileByUuid;
+                }
+                else
+                {
+                    // 2. Query grid database for hash and try to find by hash
+                    string dbHash = null;
+                    sbyte type = (sbyte)AssetType.Unknown;
+                    string name = "Restored from Log " + uuidStr;
+
+                    if (m_GridConnector != null)
+                    {
+                        try
+                        {
+                            var dbMeta = m_GridConnector.Get(uuidStr, out dbHash);
+                            if (dbMeta != null)
+                            {
+                                type = dbMeta.Type;
+                                name = dbMeta.Name;
+                            }
+                        }
+                        catch {}
+                    }
+
+                    if (!string.IsNullOrEmpty(dbHash))
+                    {
+                        string normHash = dbHash.ToLower().Replace("-", "");
+                        if (filesByName.TryGetValue(normHash, out string fileByHash))
+                        {
+                            matchedFilePath = fileByHash;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrEmpty(matchedFilePath) || !File.Exists(matchedFilePath))
+                {
+                    m_log.WarnFormat("[ADVANCED ASSET SERVICE]: File for UUID {0} not found in FSAsset repository.", uuidStr);
+                    notInFs++;
+                    continue;
+                }
+
+                try
+                {
+                    byte[] data;
+                    using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read))
+                    using (System.IO.Compression.GZipStream gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress))
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        gz.CopyTo(ms);
+                        data = ms.ToArray();
+                    }
+
+                    sbyte finalType = (sbyte)AssetType.Unknown;
+                    string finalName = "Restored from Log " + uuidStr;
+
+                    if (m_GridConnector != null)
+                    {
+                        try
+                        {
+                            var dbMeta = m_GridConnector.Get(uuidStr, out _);
+                            if (dbMeta != null)
+                            {
+                                finalType = dbMeta.Type;
+                                finalName = dbMeta.Name;
+                            }
+                        }
+                        catch {}
+                    }
+
+                    m_PackManager.StoreAssetData(uuidStr, data, finalType, finalName);
+                    restored++;
+                    m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Successfully restored asset {0} from FS legacy folder.", uuidStr);
+                }
+                catch (Exception ex)
+                {
+                    m_log.Error(string.Format("[ADVANCED ASSET SERVICE]: Failed to restore asset {0}: {1}", uuidStr, ex.Message));
+                    failed++;
+                }
+            }
+
+            MainConsole.Instance?.Output(string.Format("Restoration completed: {0} restored, {1} failed, {2} not found in FS.", restored, failed, notInFs));
         }
 
         private byte[] FetchAssetFromUrl(string baseUrl, string assetId, ref sbyte type, ref string name)
