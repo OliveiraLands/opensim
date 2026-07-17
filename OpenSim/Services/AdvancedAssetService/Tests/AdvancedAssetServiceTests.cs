@@ -295,6 +295,56 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             }
         }
 
+        [Test]
+        public void TestOptimizeDatabase()
+        {
+            if (Directory.Exists("test_optimize_packs"))
+            {
+                try { Directory.Delete("test_optimize_packs", true); } catch {}
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", "test_optimize_packs");
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID uuid = UUID.Random();
+                byte[] data = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD };
+                AssetBase asset = new AssetBase(uuid, "Test Optimize", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = data };
+                service.Store(asset);
+
+                var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(packManagerField, Is.Not.Null);
+                var packManager = packManagerField.GetValue(service);
+                Assert.That(packManager, Is.Not.Null);
+
+                WaitForPendingWrites(packManager);
+
+                // Run OptimizeDatabase
+                var optimizeMethod = packManager.GetType().GetMethod("OptimizeDatabase", new Type[] { typeof(Action<string>) });
+                Assert.That(optimizeMethod, Is.Not.Null);
+
+                List<string> outputs = new List<string>();
+                optimizeMethod.Invoke(packManager, new object[] { new Action<string>(msg => outputs.Add(msg)) });
+
+                // Verify that it completed successfully without errors
+                bool completed = outputs.Exists(line => line.Contains("Database optimization completed successfully."));
+                Assert.That(completed, Is.True, "Optimization should report successful completion.");
+
+                // Verify asset remains fully readable and correct
+                AssetBase retrieved = service.Get(uuid.ToString());
+                Assert.That(retrieved, Is.Not.Null);
+                Assert.That(retrieved.Data, Is.EqualTo(data));
+            }
+
+            // Cleanup
+            if (Directory.Exists("test_optimize_packs"))
+            {
+                try { Directory.Delete("test_optimize_packs", true); } catch {}
+            }
+        }
+
         private void WaitForPendingWrites(object packManager)
         {
             var cacheField = packManager.GetType().GetField("m_PendingWritesCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

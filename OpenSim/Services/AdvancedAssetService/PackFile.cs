@@ -2254,6 +2254,38 @@ namespace OpenSim.Services.AdvancedAssetService
             }
         }
 
+        public void OptimizeDatabase(Action<string> output)
+        {
+            output("Acquiring database lock for optimization...");
+            lock (m_Lock)
+            {
+                FlushBatch();
+                
+                output("Running ANALYZE (updating query optimizer statistics)...");
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "ANALYZE";
+                    cmd.ExecuteNonQuery();
+                }
+                
+                output("Running REINDEX (rebuilding indexes)...");
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "REINDEX";
+                    cmd.ExecuteNonQuery();
+                }
+
+                output("Running VACUUM (reclaiming free space and defragmenting database)...");
+                using (var cmd = m_Connection.CreateCommand())
+                {
+                    cmd.CommandText = "VACUUM";
+                    cmd.ExecuteNonQuery();
+                }
+
+                output("Database optimization completed successfully.");
+            }
+        }
+
         private void ScanPackFileResilient(string path, int packId, Action<string> output)
         {
             using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))

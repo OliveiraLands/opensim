@@ -121,6 +121,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory", "aas scan-inventory <path|url>", "Scan inventory database and import missing assets from an external folder or asset server URL", HandleScanInventory);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-inventory-iar", "aas scan-inventory-iar <path>", "Scan inventory database and import missing assets from an extracted IAR folder", HandleScanInventoryIar);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas defrag", "aas defrag", "Defragment PackFiles and release dead storage space", HandleDefragment);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas optimize", "aas optimize", "Optimize the SQLite index database (VACUUM and ANALYZE)", HandleOptimize);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
@@ -1507,6 +1508,19 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
             m_PackManager.Defragment(m_GridConnector, msg => MainConsole.Instance.Output("AAS Defrag: " + msg));
+        }
+
+        private void HandleOptimize(string module, string[] args)
+        {
+            MainConsole.Instance.Output("Optimizing SQLite index database...");
+            try
+            {
+                m_PackManager.OptimizeDatabase(msg => MainConsole.Instance.Output(msg));
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Error optimizing SQLite database: " + ex.Message);
+            }
         }
 
         private void HandleDeepRepair(string module, string[] args)
