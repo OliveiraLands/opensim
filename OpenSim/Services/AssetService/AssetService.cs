@@ -61,8 +61,7 @@ namespace OpenSim.Services.AssetService
                     if (assetConfig == null)
                         throw new Exception("No " + m_ConfigName + " configuration");
 
-                    string loaderArgs = assetConfig.GetString("AssetLoaderArgs",
-                            String.Empty);
+                    string loaderArgs = assetConfig.GetString("AssetLoaderArgs", string.Empty);
 
                     bool assetLoaderEnabled = assetConfig.GetBoolean("AssetLoaderEnabled", true);
 
@@ -92,11 +91,8 @@ namespace OpenSim.Services.AssetService
 
         public virtual AssetBase Get(string id)
         {
-//            m_log.DebugFormat("[ASSET SERVICE]: Get asset for {0}", id);
-
-            UUID assetID;
-
-            if (!UUID.TryParse(id, out assetID))
+            //            m_log.DebugFormat("[ASSET SERVICE]: Get asset for {0}", id);
+            if (!UUID.TryParse(id, out UUID assetID))
             {
                 m_log.WarnFormat("[ASSET SERVICE]: Could not parse requested asset id {0}", id);
                 return null;
@@ -160,8 +156,8 @@ namespace OpenSim.Services.AssetService
         {
             try
             {
-                UUID[] uuid = Array.ConvertAll(ids, id => UUID.Parse(id));
-                return m_Database.AssetsExist(uuid);
+                UUID[] uuids = Array.ConvertAll(ids, id => UUID.Parse(id));
+                return m_Database.AssetsExist(uuids);
             }
             catch (Exception e)
             {
@@ -172,15 +168,13 @@ namespace OpenSim.Services.AssetService
 
         public virtual string Store(AssetBase asset)
         {
-            bool exists = m_Database.AssetsExist(new[] { asset.FullID })[0];
-            if (!exists)
+            bool[] assetsexist = m_Database.AssetsExist([ asset.FullID ] );
+            if (assetsexist.Length == 0 || !assetsexist[0])
             {
 //                m_log.DebugFormat(
 //                    "[ASSET SERVICE]: Storing asset {0} {1}, bytes {2}", asset.Name, asset.FullID, asset.Data.Length);
                if (!m_Database.StoreAsset(asset))
-                {
-                return UUID.Zero.ToString();
-                }
+                    return UUID.Zero.ToString();
             }
 //            else
 //            {
@@ -198,13 +192,12 @@ namespace OpenSim.Services.AssetService
 
         public virtual bool Delete(string id)
         {
-//            m_log.DebugFormat("[ASSET SERVICE]: Deleting asset {0}", id);
+            //m_log.DebugFormat("[ASSET SERVICE]: Deleting asset {0}", id);
 
-            UUID assetID;
-            if (!UUID.TryParse(id, out assetID))
-                return false;
+            if (UUID.TryParse(id, out _))
+                return m_Database.Delete(id);
 
-            return m_Database.Delete(id);
+            return false;
         }
 
         public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)

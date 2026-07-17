@@ -381,7 +381,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                 ad.AttachmentObjectStates = null;
 
                 if (attachments.Count > 0)
-                    m_scene.IncomingAttechments(sp, attachments);
+                    m_scene.IncomingAttachments(sp, attachments);
                 else
                     sp.GotAttachmentsData = true;
             }
@@ -1008,6 +1008,12 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
         /// <param name="saveAllScripted"></param>
         private void UpdateKnownItem(IScenePresence sp, SceneObjectGroup grp, string scriptedState)
         {
+            if (sp.IsNPC)
+                return;
+
+            if (m_invAccessModule is null)
+                return;
+
             if(!grp.HasGroupChanged)
             {
                 if (DebugLevel > 0)
@@ -1020,17 +1026,9 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
 
             grp.HasGroupChanged = false;
 
-            if (m_invAccessModule is null)
-                return;
-
             if (grp.FromItemID.IsZero())
             {
                 // We can't save temp attachments
-                return;
-            }
-
-            if (sp.IsNPC)
-            {
                 return;
             }
 
@@ -1153,6 +1151,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                 so.IsSelected = false; // fudge....
 
                 so.ScheduleGroupForUpdate(PrimUpdateFlags.FullUpdatewithAnimMatOvr);
+                so.HasGroupChanged = false;
             }
 
             // In case it is later dropped again, don't let
@@ -1353,9 +1352,9 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                 return null;
             }
 
-            if (lastattPoint != objatt.AttachmentPoint ||
-                    !lastPos.Equals(objatt.RootPart.OffsetPosition) ||
-                    !lastAttPos.Equals(objatt.RootPart.AttachedPos))
+            if(lastattPoint != objatt.AttachmentPoint ||
+                    lastPos.NotEqual(objatt.RootPart.OffsetPosition) ||
+                    lastAttPos.NotEqual(objatt.RootPart.AttachedPos))
                 objatt.HasGroupChanged = true;
 
             return objatt;

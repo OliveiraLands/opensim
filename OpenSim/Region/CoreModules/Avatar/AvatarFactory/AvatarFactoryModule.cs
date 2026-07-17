@@ -67,6 +67,10 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
 
         private object m_setAppearanceLock = new object();
 
+        // add throttle
+        private const int REBAKE_THROTTLE_SECONDS = 30;
+        readonly ExpiringKey<string> m_rebakeThrottle = new(500 * REBAKE_THROTTLE_SECONDS);
+        
         #region Region Module interface
 
         public void Initialise(IConfigSource config)
@@ -451,10 +455,21 @@ namespace OpenSim.Region.CoreModules.Avatar.AvatarFactory
  
             sp.Appearance.WearableCacheItems = wearableCache;
 
+            // throttle rebake requests
             if (missing.Count > 0)
             {
+                string spuuidstr = sp.UUID.ToString();
                 foreach (UUID id in missing)
+                {
+                    string key = spuuidstr + id.ToString();
+
+                    if(m_rebakeThrottle.AddOrUpdate(key, 1000 * REBAKE_THROTTLE_SECONDS))
+                        continue;
+
+                    m_log.Debug($"[AVFACTORY]: Missing baked texture {id} for {sp.Name}, requesting rebake");
+
                     sp.ControllingClient.SendRebakeAvatarTextures(id);
+                }
             }
 
             bool changed = false;
