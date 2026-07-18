@@ -368,9 +368,26 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                                 $"2026-07-17 14:39:25 WARN  [InventoryAccessModule]: Could not find asset {missingUuid2} for item Test Item 2\n";
             File.WriteAllText("test_urma.log", logContent);
 
-            // 2. Create a dummy FSAsset folder with one of the assets named by UUID (normalized)
+            // 2. Create a dummy FSAsset/Cache folder
             Directory.CreateDirectory("test_restore_log_fs");
-            string dataStr2 = "Restored Content 2";
+
+            // 2a. Write missingUuid1 as a serialized AssetBase (Flotsam Cache style)
+            string dataStr1 = "Restored Content 1 (Serialized)";
+            AssetBase asset1 = new AssetBase(missingUuid1.ToString(), "Test Serialized", (sbyte)AssetType.Object, UUID.ZeroString)
+            {
+                Data = System.Text.Encoding.UTF8.GetBytes(dataStr1)
+            };
+            string serializedFilePath = Path.Combine("test_restore_log_fs", missingUuid1.ToString().ToLower().Replace("-", ""));
+            #pragma warning disable SYSLIB0011
+            var bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+            using (FileStream fs = new FileStream(serializedFilePath, FileMode.Create, FileAccess.Write))
+            {
+                bformatter.Serialize(fs, asset1);
+            }
+            #pragma warning restore SYSLIB0011
+
+            // 2b. Write missingUuid2 as a GZip compressed file (FSAsset style)
+            string dataStr2 = "Restored Content 2 (GZip)";
             byte[] dataBytes2 = System.Text.Encoding.UTF8.GetBytes(dataStr2);
             string uuidFilePath = Path.Combine("test_restore_log_fs", missingUuid2.ToString().ToLower().Replace("-", "") + ".gz");
             using (FileStream fs = new FileStream(uuidFilePath, FileMode.Create, FileAccess.Write))
@@ -391,10 +408,15 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                 string[] args = new string[] { "aas", "restore-from-log", "test_urma.log", "test_restore_log_fs" };
                 restoreMethod.Invoke(service, new object[] { "aas", args });
 
-                // Verify that missingUuid2 (which was in FS named by UUID) was successfully restored!
-                AssetBase retrieved = service.Get(missingUuid2.ToString());
-                Assert.That(retrieved, Is.Not.Null);
-                Assert.That(System.Text.Encoding.UTF8.GetString(retrieved.Data), Is.EqualTo(dataStr2));
+                // Verify that missingUuid1 (serialized) was successfully restored!
+                AssetBase retrieved1 = service.Get(missingUuid1.ToString());
+                Assert.That(retrieved1, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(retrieved1.Data), Is.EqualTo(dataStr1));
+
+                // Verify that missingUuid2 (GZip) was successfully restored!
+                AssetBase retrieved2 = service.Get(missingUuid2.ToString());
+                Assert.That(retrieved2, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(retrieved2.Data), Is.EqualTo(dataStr2));
             }
 
             // Cleanup

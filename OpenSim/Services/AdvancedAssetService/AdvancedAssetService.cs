@@ -1601,17 +1601,66 @@ namespace OpenSim.Services.AdvancedAssetService
 
                 try
                 {
-                    byte[] data;
-                    using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read))
-                    using (System.IO.Compression.GZipStream gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress))
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                        gz.CopyTo(ms);
-                        data = ms.ToArray();
-                    }
-
+                    byte[] data = null;
                     sbyte finalType = (sbyte)AssetType.Unknown;
                     string finalName = "Restored from Log " + uuidStr;
+
+                    // Read first 2 bytes to check for GZip magic signature (0x1F, 0x8B)
+                    byte[] header = new byte[2];
+                    using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read))
+                    {
+                        fs.Read(header, 0, 2);
+                    }
+
+                    if (header[0] == 0x1F && header[1] == 0x8B)
+                    {
+                        // GZip format (legacy FSAsset)
+                        using (FileStream fs = new FileStream(matchedFilePath, FileMode.Open, FileAccess.Read))
+                        using (System.IO.Compression.GZipStream gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress))
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            gz.CopyTo(ms);
+                            data = ms.ToArray();
+                        }
+                    }
+                    else
+                    {
+                        // Uncompressed format (could be BinaryFormatter serialized AssetBase or raw data)
+                        byte[] rawBytes = File.ReadAllBytes(matchedFilePath);
+
+                        // Check if it matches .NET BinaryFormatter serialization header (starts with 0x00 0x01 0x00 0x00 0x00)
+                        if (rawBytes.Length > 5 && rawBytes[0] == 0x00 && rawBytes[1] == 0x01 && rawBytes[2] == 0x00 && rawBytes[3] == 0x00 && rawBytes[4] == 0x00)
+                        {
+                            try
+                            {
+                                #pragma warning disable SYSLIB0011
+                                var bformatter = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+                                using (MemoryStream ms = new MemoryStream(rawBytes))
+                                {
+                                    AssetBase serializedAsset = (AssetBase)bformatter.Deserialize(ms);
+                                    if (serializedAsset != null)
+                                    {
+                                        data = serializedAsset.Data;
+                                        finalType = serializedAsset.Type;
+                                        finalName = serializedAsset.Name;
+                                    }
+                                }
+                                #pragma warning restore SYSLIB0011
+                            }
+                            catch
+                            {
+                                // Fallback to raw bytes if deserialization fails
+                                data = rawBytes;
+                            }
+                        }
+                        else
+                        {
+                            // Raw uncompressed asset bytes
+                            data = rawBytes;
+                        }
+                    }
+
+
 
                     if (m_GridConnector != null)
                     {
