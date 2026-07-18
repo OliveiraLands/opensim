@@ -411,6 +411,66 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                 try { File.Delete("test_urma.log"); } catch {}
             }
         }
+        [Test]
+        public void TestBulkUploadAssetsPerformance()
+        {
+            if (Directory.Exists("test_bulk_packs"))
+            {
+                try { Directory.Delete("test_bulk_packs", true); } catch {}
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", "test_bulk_packs");
+
+            int numAssets = 1000;
+            List<AssetBase> assets = new List<AssetBase>();
+            for (int i = 0; i < numAssets; i++)
+            {
+                UUID uuid = UUID.Random();
+                byte[] data = System.Text.Encoding.UTF8.GetBytes("Bulk Upload Asset Content " + i);
+                assets.Add(new AssetBase(uuid.ToString(), "Bulk Test " + i, (sbyte)AssetType.Object, UUID.ZeroString)
+                {
+                    Data = data
+                });
+            }
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var asset in assets)
+                {
+                    service.Store(asset);
+                }
+                watch.Stop();
+                long enqueueTimeMs = watch.ElapsedMilliseconds;
+
+                var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(packManagerField, Is.Not.Null);
+                object packManager = packManagerField.GetValue(service);
+                Assert.That(packManager, Is.Not.Null);
+
+                var diskWatch = System.Diagnostics.Stopwatch.StartNew();
+                WaitForPendingWrites(packManager);
+                diskWatch.Stop();
+                long diskTimeMs = diskWatch.ElapsedMilliseconds;
+                double totalSec = (enqueueTimeMs + diskTimeMs) / 1000.0;
+                if (totalSec <= 0) totalSec = 0.001;
+                double throughput = numAssets / totalSec;
+
+                System.Console.WriteLine(string.Format("[PERFORMANCE]: Enqueued in {0}ms, Flushed to disk in additional {1}ms. Total throughput: {2:F2} assets/second.", enqueueTimeMs, diskTimeMs, throughput));
+
+                // Verify that assets are readable
+                AssetBase retrieved = service.Get(assets[500].ID);
+                Assert.That(retrieved, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(retrieved.Data), Is.EqualTo("Bulk Upload Asset Content 500"));
+            }
+
+            if (Directory.Exists("test_bulk_packs"))
+            {
+                try { Directory.Delete("test_bulk_packs", true); } catch {}
+            }
+        }
 
         private void WaitForPendingWrites(object packManager)
         {

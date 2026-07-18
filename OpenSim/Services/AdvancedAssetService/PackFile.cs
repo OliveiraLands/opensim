@@ -71,7 +71,7 @@ namespace OpenSim.Services.AdvancedAssetService
         
         private Timer m_BatchTimer;
         private ConcurrentQueue<PendingUpdate> m_PendingUpdates = new ConcurrentQueue<PendingUpdate>();
-        private BlockingCollection<AssetWriteOp> m_WriteQueue = new BlockingCollection<AssetWriteOp>(5000);
+        private BlockingCollection<AssetWriteOp> m_WriteQueue = new BlockingCollection<AssetWriteOp>(20000);
         private ConcurrentDictionary<string, AssetWriteOp> m_PendingWritesCache = new ConcurrentDictionary<string, AssetWriteOp>(StringComparer.OrdinalIgnoreCase);
 
         private ConcurrentDictionary<string, PackFileIndexEntry> m_InFlightHashes = new ConcurrentDictionary<string, PackFileIndexEntry>();
@@ -949,7 +949,7 @@ namespace OpenSim.Services.AdvancedAssetService
                             bw.Write(op.Data);
 
                             bw.Flush();
-                            fs.Flush(true);
+                            fs.Flush();
                         }
 
                         entry = new PackFileIndexEntry 
@@ -1000,7 +1000,7 @@ namespace OpenSim.Services.AdvancedAssetService
                             bw.Write(hashBytes);
 
                             bw.Flush();
-                            fs.Flush(true);
+                            fs.Flush();
                         }
                     }
 
@@ -1111,6 +1111,23 @@ namespace OpenSim.Services.AdvancedAssetService
                         {
                             update.Action(cmd);
                         }
+                        // Force hardware flush of the current active pack file to ensure physical data is written before DB commit
+                        string currentPackPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", m_CurrentPackID));
+                        if (File.Exists(currentPackPath))
+                        {
+                            try
+                            {
+                                using (FileStream fs = new FileStream(currentPackPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+                                {
+                                    fs.Flush(true);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                m_log.Warn("[ADVANCED ASSET SERVICE]: Failed to force hardware flush of pack file: " + ex.Message);
+                            }
+                        }
+
                         trans.Commit();
                         batchSucceeded = true;
                     }
