@@ -3230,11 +3230,16 @@ namespace OpenSim.Services.AdvancedAssetService
         private void HandleGenerateDummies(string module, string[] args)
         {
             bool dryRun = false;
+            bool verifyData = false;
             foreach (string arg in args)
             {
                 if (arg.Equals("--dry-run", StringComparison.OrdinalIgnoreCase))
                 {
                     dryRun = true;
+                }
+                if (arg.Equals("--verify-data", StringComparison.OrdinalIgnoreCase))
+                {
+                    verifyData = true;
                 }
             }
 
@@ -3325,12 +3330,22 @@ namespace OpenSim.Services.AdvancedAssetService
                 string normUuid = item.assetID.ToString().ToLower().Replace("-", "");
                 bool exists = aasSet.Contains(normUuid);
 
-                // If not in local cache, check fallback if configured
+                // If exists locally but --verify-data is enabled, verify it physically has non-empty data
+                if (exists && verifyData)
+                {
+                    sbyte dummyType;
+                    string dummyName;
+                    byte[] localData = m_PackManager.GetAssetData(item.assetID.ToString(), out dummyType, out dummyName, false);
+                    exists = localData != null && localData.Length > 0;
+                }
+
+                // If not in local cache (or has no data), check fallback if configured
                 if (!exists && m_FallbackService != null)
                 {
                     try
                     {
-                        exists = m_FallbackService.Get(item.assetID.ToString()) != null;
+                        var fallbackAsset = m_FallbackService.Get(item.assetID.ToString());
+                        exists = fallbackAsset != null && fallbackAsset.Data != null && fallbackAsset.Data.Length > 0;
                     }
                     catch {}
                 }
