@@ -3284,24 +3284,48 @@ namespace OpenSim.Services.AdvancedAssetService
                 return;
             }
 
+            MainConsole.Instance.Output("Loading list of all existing assets from Advanced Cache database...");
+            List<AssetMetadataRecord> allAasAssets = m_PackManager.GetAllAssets();
+            HashSet<string> aasSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (allAasAssets != null)
+            {
+                foreach (var meta in allAasAssets)
+                {
+                    if (!string.IsNullOrEmpty(meta.UUID))
+                    {
+                        aasSet.Add(meta.UUID.ToLower().Replace("-", ""));
+                    }
+                }
+            }
+            MainConsole.Instance.Output(string.Format("Loaded {0} existing assets into memory index.", aasSet.Count));
+
             MainConsole.Instance.Output("Checking asset existence and identifying missing ones...");
 
             // Group missing items by assetID to also find the first name/type
             Dictionary<UUID, XInventoryItem> missingAssets = new Dictionary<UUID, XInventoryItem>();
             HashSet<UUID> checkedIDs = new HashSet<UUID>();
 
-            foreach (var item in items)
+            int scanCount = 0;
+            for (int k = 0; k < items.Length; k++)
             {
+                scanCount++;
+                if (scanCount % 50000 == 0)
+                {
+                    MainConsole.Instance.Output(string.Format("Scanned {0}/{1} inventory items...", scanCount, items.Length));
+                }
+
+                var item = items[k];
                 if (item.assetID == UUID.Zero)
                     continue;
 
                 if (checkedIDs.Contains(item.assetID))
                     continue;
 
-                // Check if it exists locally
-                bool exists = m_PackManager.AssetExists(item.assetID.ToString());
+                // In-memory check against local assets
+                string normUuid = item.assetID.ToString().ToLower().Replace("-", "");
+                bool exists = aasSet.Contains(normUuid);
 
-                // If not locally, check fallback if configured
+                // If not in local cache, check fallback if configured
                 if (!exists && m_FallbackService != null)
                 {
                     try
