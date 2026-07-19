@@ -493,6 +493,39 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                 try { Directory.Delete("test_bulk_packs", true); } catch {}
             }
         }
+        [Test]
+        public void TestGetDummyAssetData()
+        {
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", "test_dummies_packs");
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                var getDummyMethod = typeof(AdvancedAssetService).GetMethod("GetDummyAssetData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.That(getDummyMethod, Is.Not.Null);
+
+                // 1. Test Texture
+                object[] args1 = new object[] { (sbyte)AssetType.Texture, (sbyte)0, "" };
+                byte[] data1 = (byte[])getDummyMethod.Invoke(service, args1);
+                Assert.That(data1, Is.Not.Null);
+                Assert.That(data1.Length, Is.GreaterThan(18)); // Valid TGA header length
+                Assert.That((sbyte)args1[1], Is.EqualTo((sbyte)AssetType.Texture));
+                Assert.That((string)args1[2], Contains.Substring("Texture"));
+
+                // 2. Test LSLText
+                object[] args2 = new object[] { (sbyte)AssetType.LSLText, (sbyte)0, "" };
+                byte[] data2 = (byte[])getDummyMethod.Invoke(service, args2);
+                Assert.That(data2, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(data2), Contains.Substring("default"));
+            }
+
+            // Cleanup
+            if (Directory.Exists("test_dummies_packs"))
+            {
+                try { Directory.Delete("test_dummies_packs", true); } catch {}
+            }
+        }
 
         private void WaitForPendingWrites(object packManager)
         {

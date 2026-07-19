@@ -127,6 +127,7 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask> [<import_folder>] [--flag-suspicious]", "Scan inventories and region databases to identify used assets, importing missing ones and optionally flagging unused ones as suspicious", HandleScanUsedAssets);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas restore-from-log", "aas restore-from-log <log_path> <fs_path>", "Scan a log file for missing asset warnings and attempt to restore them from a FSAsset folder", HandleRestoreFromLog);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas generate-dummies", "aas generate-dummies [--dry-run]", "Scan inventory items for missing assets and generate dummy placeholder assets for them", HandleGenerateDummies);
         }
 
         public virtual AssetBase Get(string id)
@@ -3223,6 +3224,285 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 error = ex.Message;
                 return false;
+            }
+        }
+
+        private void HandleGenerateDummies(string module, string[] args)
+        {
+            bool dryRun = false;
+            foreach (string arg in args)
+            {
+                if (arg.Equals("--dry-run", StringComparison.OrdinalIgnoreCase))
+                {
+                    dryRun = true;
+                }
+            }
+
+            MainConsole.Instance.Output("==================================================================");
+            MainConsole.Instance.Output("GENERATE DUMMIES FOR MISSING ASSETS IN INVENTORY");
+            MainConsole.Instance.Output("==================================================================");
+
+            if (string.IsNullOrEmpty(m_DatabaseProvider) || string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                MainConsole.Instance.Output("Database provider or connection string not configured in AdvancedAssetService.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Loading inventory database...");
+            IXInventoryData invDatabase;
+            try
+            {
+                invDatabase = LoadPlugin<IXInventoryData>(m_DatabaseProvider, new object[] { m_DatabaseConnectionString, string.Empty });
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to load inventory database: " + ex.Message);
+                return;
+            }
+
+            if (invDatabase == null)
+            {
+                MainConsole.Instance.Output("Failed to instantiate inventory database plugin.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Querying inventory items from database...");
+            XInventoryItem[] items;
+            try
+            {
+                items = invDatabase.GetItems(new string[0], new string[0]);
+            }
+            catch (Exception ex)
+            {
+                MainConsole.Instance.Output("Failed to query inventory items: " + ex.Message);
+                return;
+            }
+
+            if (items == null || items.Length == 0)
+            {
+                MainConsole.Instance.Output("No items found in inventory database.");
+                return;
+            }
+
+            MainConsole.Instance.Output("Checking asset existence and identifying missing ones...");
+
+            // Group missing items by assetID to also find the first name/type
+            Dictionary<UUID, XInventoryItem> missingAssets = new Dictionary<UUID, XInventoryItem>();
+            HashSet<UUID> checkedIDs = new HashSet<UUID>();
+
+            foreach (var item in items)
+            {
+                if (item.assetID == UUID.Zero)
+                    continue;
+
+                if (checkedIDs.Contains(item.assetID))
+                    continue;
+
+                // Check if it exists locally
+                bool exists = m_PackManager.AssetExists(item.assetID.ToString());
+
+                // If not locally, check fallback if configured
+                if (!exists && m_FallbackService != null)
+                {
+                    try
+                    {
+                        exists = m_FallbackService.Get(item.assetID.ToString()) != null;
+                    }
+                    catch {}
+                }
+
+                if (!exists)
+                {
+                    missingAssets[item.assetID] = item;
+                }
+                checkedIDs.Add(item.assetID);
+            }
+
+            MainConsole.Instance.Output(string.Format("Found {0} missing assets referenced in inventory.", missingAssets.Count));
+
+            if (missingAssets.Count == 0)
+            {
+                MainConsole.Instance.Output("No missing assets found. Everything is healthy!");
+                return;
+            }
+
+            if (dryRun)
+            {
+                MainConsole.Instance.Output("[DRY RUN]: Scan completed. No changes were made.");
+                foreach (var kvp in missingAssets)
+                {
+                    MainConsole.Instance.Output(string.Format("Missing Asset: {0} | Type: {1} | Item: {2}", kvp.Key, kvp.Value.assetType, kvp.Value.inventoryName));
+                }
+                return;
+            }
+
+            MainConsole.Instance.Output("Generating dummy placeholders and storing them in AAS...");
+
+            List<KeyValuePair<UUID, XInventoryItem>> missingList = new List<KeyValuePair<UUID, XInventoryItem>>(missingAssets);
+
+            int successCount = 0;
+            int errorCount = 0;
+
+            int startIndex = m_PackManager.PromptResumeProgress("generate-dummies", "", missingList.Count, out bool resume);
+            if (!resume)
+            {
+                m_PackManager.StartCommandProgress("generate-dummies", "", missingList.Count);
+            }
+            else
+            {
+                string metadata = m_PackManager.GetConfig("cmd_state:generate-dummies:metadata");
+                if (!string.IsNullOrEmpty(metadata))
+                {
+                    string[] parts = metadata.Split(',');
+                    if (parts.Length == 2)
+                    {
+                        int.TryParse(parts[0], out successCount);
+                        int.TryParse(parts[1], out errorCount);
+                    }
+                }
+            }
+
+            for (int i = startIndex; i < missingList.Count; i++)
+            {
+                if (m_PackManager.CheckUserAbort())
+                {
+                    MainConsole.Instance.Output("Dummy generation aborted by user.");
+                    return;
+                }
+
+                var kvp = missingList[i];
+                UUID missingUuid = kvp.Key;
+                XInventoryItem item = kvp.Value;
+                sbyte type = (sbyte)item.assetType;
+
+                try
+                {
+                    sbyte finalType;
+                    string finalName;
+                    byte[] dummyData = GetDummyAssetData(type, out finalType, out finalName);
+
+                    // Override final name with a combination of the user's item name
+                    finalName = string.Format("Dummy Placeholder for '{0}' (Missing)", item.inventoryName);
+
+                    m_PackManager.StoreAssetData(missingUuid.ToString(), dummyData, finalType, finalName);
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    MainConsole.Instance.Output(string.Format("Failed to store dummy for asset {0}: {1}", missingUuid, ex.Message));
+                    errorCount++;
+                }
+
+                m_PackManager.UpdateCommandProgress("generate-dummies", i + 1);
+                m_PackManager.SetConfig("cmd_state:generate-dummies:metadata", string.Format("{0},{1}", successCount, errorCount));
+            }
+
+            m_PackManager.ClearCommandProgress("generate-dummies");
+
+            MainConsole.Instance.Output("==================================================================");
+            MainConsole.Instance.Output(string.Format("DUMMY GENERATION COMPLETED! Successfully created: {0} | Errors: {1}", successCount, errorCount));
+            MainConsole.Instance.Output("==================================================================");
+        }
+
+        private byte[] GetDummyAssetData(sbyte type, out sbyte finalType, out string finalName)
+        {
+            finalType = type;
+            finalName = "Dummy Placeholder";
+
+            switch ((AssetType)type)
+            {
+                case AssetType.Texture:
+                    // A tiny 2x2 TGA file (gray/white pixels)
+                    finalName = "Dummy Texture Placeholder";
+                    return new byte[] {
+                        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x02, 0x00, 0x02, 0x00, 0x18, 0x00,
+                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+                    };
+
+                case AssetType.Sound:
+                    finalName = "Dummy Sound Placeholder";
+                    // Tiny valid WAV header (silent sound)
+                    return new byte[] {
+                        0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
+                        0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+                        0x44, 0xac, 0x00, 0x00, 0x88, 0x58, 0x01, 0x00, 0x02, 0x00, 0x10, 0x00,
+                        0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00
+                    };
+
+                case AssetType.LSLText:
+                    finalName = "Dummy Script Placeholder";
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "// This script was missing on the server and replaced with a dummy placeholder.\n" +
+                        "default\n" +
+                        "{\n" +
+                        "    state_entry()\n" +
+                        "    {\n" +
+                        "        llOwnerSay(\"Warning: This script asset was missing and has been replaced with a dummy script.\");\n" +
+                        "    }\n" +
+                        "}\n"
+                    );
+
+                case AssetType.Notecard:
+                    finalName = "Dummy Notecard Placeholder";
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "Linden text version 2\n" +
+                        "{\n" +
+                        "LLEmbeddedItems version 1\n" +
+                        "{\n" +
+                        "count 0\n" +
+                        "}\n" +
+                        "Text length 65\n" +
+                        "This notecard was missing on the server and replaced by a dummy." +
+                        "}"
+                    );
+
+                case AssetType.Object:
+                    finalName = "Dummy Object Placeholder";
+                    // A simple valid minimal primitive XML
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "<SceneObjectGroup>\n" +
+                        "  <RootPart>\n" +
+                        "    <SceneObjectPart>\n" +
+                        "      <Name>Dummy Primitive</Name>\n" +
+                        "      <Description>Missing Asset Placeholder</Description>\n" +
+                        "      <UUID>" + UUID.Random().ToString() + "</UUID>\n" +
+                        "    </SceneObjectPart>\n" +
+                        "  </RootPart>\n" +
+                        "  <OtherParts />\n" +
+                        "</SceneObjectGroup>"
+                    );
+
+                case AssetType.Clothing:
+                    finalName = "Dummy Clothing Placeholder";
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "Linden Wearable Wearable Version 1.0\n" +
+                        "Dummy Clothing\n" +
+                        "parameters 0\n" +
+                        "textures 0\n"
+                    );
+
+                case AssetType.Bodypart:
+                    finalName = "Dummy Bodypart Placeholder";
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "Linden Wearable Wearable Version 1.0\n" +
+                        "Dummy Bodypart\n" +
+                        "parameters 0\n" +
+                        "textures 0\n"
+                    );
+
+                case AssetType.Gesture:
+                    finalName = "Dummy Gesture Placeholder";
+                    return System.Text.Encoding.UTF8.GetBytes(
+                        "Active: False\n" +
+                        "Trigger: /dummy\n" +
+                        "Replace: \n" +
+                        "Dummy gesture.\n"
+                    );
+
+                default:
+                    // Fallback to empty byte array for unknown/other types
+                    return new byte[0];
             }
         }
 
