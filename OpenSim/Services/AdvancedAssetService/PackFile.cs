@@ -449,19 +449,16 @@ namespace OpenSim.Services.AdvancedAssetService
 
                 m_log.Info(string.Format("[AAS Migration]: Identified {0} duplicate links missing physically from pack files.", missingLinks.Count));
 
-                int migratedLinksCount = 0;
-                foreach (var link in missingLinks)
+                if (missingLinks.Count > 0)
                 {
-                    if (m_Disposed) return;
+                    m_log.Info(string.Format("[AAS Migration]: Bulk writing {0} duplicate link records physically to pack files...", missingLinks.Count));
+                    WriteLinkRecordsPhysically(missingLinks);
+                }
 
-                    m_log.Info(string.Format("[AAS Migration]: Securing missing duplicate link in pack files for UUID {0} (Hash: {1})", link.UUID, link.Hash));
-                    WriteLinkRecordPhysically(link.UUID, link.Hash, link.Type, link.Name, link.Created);
-                    migratedLinksCount++;
-
-                    if (m_PendingDuplicateLinksCount > 0)
-                    {
-                        m_PendingDuplicateLinksCount--;
-                    }
+                int migratedLinksCount = missingLinks.Count;
+                if (m_PendingDuplicateLinksCount > 0)
+                {
+                    m_PendingDuplicateLinksCount = Math.Max(0, m_PendingDuplicateLinksCount - migratedLinksCount);
                 }
 
                 lock (m_Lock)
@@ -481,6 +478,94 @@ namespace OpenSim.Services.AdvancedAssetService
             {
                 if (m_Disposed) return;
                 m_log.Error("[AAS Migration]: Migration failed: " + ex.Message);
+            }
+        }
+
+        private void WriteLinkRecordsPhysically(List<AssetMetadataRecord> links)
+        {
+            if (links == null || links.Count == 0) return;
+
+            string packPath = "";
+            int packId = 0;
+
+            lock (m_Lock)
+            {
+                packId = m_CurrentPackID;
+                packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+            }
+
+            FileStream fs = null;
+            BinaryWriter bw = null;
+
+            try
+            {
+                fs = new FileStream(packPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                bw = new BinaryWriter(fs);
+
+                for (int i = 0; i < links.Count; i++)
+                {
+                    if (m_Disposed) break;
+
+                    var link = links[i];
+
+                    // Check if packfile size exceeded
+                    if (fs.Length > m_MaxPackSize)
+                    {
+                        bw.Flush();
+                        fs.Flush(true);
+                        bw.Dispose();
+                        fs.Dispose();
+
+                        lock (m_Lock)
+                        {
+                            packId = m_CurrentPackID + 1;
+                            m_CurrentPackID = packId;
+                            packPath = Path.Combine(m_BasePath, string.Format("pack_{0}.bin", packId));
+                            ExecuteNonQuery(string.Format("INSERT OR REPLACE INTO config (key, value) VALUES ('current_pack_id', '{0}')", m_CurrentPackID));
+                        }
+
+                        fs = new FileStream(packPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                        bw = new BinaryWriter(fs);
+                    }
+
+                    bw.Write(MAGIC_NUMBER_LINK);
+                    bw.Write(RECORD_VERSION);
+                    bw.Write(new UUID(link.UUID).GetBytes());
+                    bw.Write(link.Type);
+                    bw.Write(link.Created);
+                    byte[] nameBytes = Encoding.UTF8.GetBytes(link.Name ?? "");
+                    bw.Write((ushort)nameBytes.Length);
+                    bw.Write(nameBytes);
+
+                    byte[] hashBytes = Encoding.UTF8.GetBytes(link.Hash);
+                    bw.Write((ushort)hashBytes.Length);
+                    bw.Write(hashBytes);
+
+                    // Call fsync/flush periodically or just once at the end of the batch
+                    if (i % 2000 == 0)
+                    {
+                        bw.Flush();
+                        fs.Flush(true);
+                    }
+                }
+
+                if (bw != null)
+                {
+                    bw.Flush();
+                }
+                if (fs != null)
+                {
+                    fs.Flush(true);
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.Error("[AAS Migration]: Failed bulk writing link records: " + ex.Message);
+            }
+            finally
+            {
+                if (bw != null) try { bw.Dispose(); } catch {}
+                if (fs != null) try { fs.Dispose(); } catch {}
             }
         }
 
