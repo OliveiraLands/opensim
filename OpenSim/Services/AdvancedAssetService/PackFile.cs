@@ -413,80 +413,54 @@ namespace OpenSim.Services.AdvancedAssetService
                 if (m_Disposed) return;
                 m_log.Info(string.Format("[AAS Migration]: Found {0} UUIDs physically present in pack files.", physicalUuids.Count));
 
-                var primaryEntries = new List<PackFileIndexEntry>();
+                var missingLinks = new List<AssetMetadataRecord>();
                 lock (m_Lock)
                 {
                     if (m_Disposed) return;
                     using (var cmd = m_Connection.CreateCommand())
                     {
-                        cmd.CommandText = "SELECT hash, pack_id, offset, length FROM index_assets";
+                        cmd.CommandText = "SELECT uuid, hash, type, name, created FROM asset_map";
                         using (var reader = cmd.ExecuteReader())
                         {
                             while (reader.Read())
                             {
-                                primaryEntries.Add(new PackFileIndexEntry
+                                string uuid = reader.GetString(0);
+                                string hash = reader.GetString(1);
+                                sbyte type = (sbyte)reader.GetInt32(2);
+                                string name = reader.IsDBNull(3) ? "" : reader.GetString(3);
+                                long created = reader.GetInt64(4);
+
+                                string normalizedUuid = NormalizeUUID(uuid);
+                                if (!physicalUuids.Contains(normalizedUuid))
                                 {
-                                    Hash = reader.GetString(0),
-                                    PackFileID = reader.GetInt32(1),
-                                    Offset = reader.GetInt64(2),
-                                    Length = reader.GetInt32(3)
-                                });
-                            }
-                        }
-                    }
-                }
-
-                int migratedLinksCount = 0;
-                int processedHashes = 0;
-
-                foreach (var entry in primaryEntries)
-                {
-                    if (m_Disposed) return;
-                    processedHashes++;
-                    string primaryUuid = ReadPrimaryUuidFromPack(entry.PackFileID, entry.Offset);
-                    if (primaryUuid == null) continue;
-
-                    var duplicateUuids = new List<AssetMetadataRecord>();
-                    lock (m_Lock)
-                    {
-                        if (m_Disposed) return;
-                        using (var cmd = m_Connection.CreateCommand())
-                        {
-                            cmd.CommandText = "SELECT uuid, type, name, created FROM asset_map WHERE hash = ? AND uuid != ?";
-                            cmd.Parameters.AddWithValue(null, entry.Hash);
-                            cmd.Parameters.AddWithValue(null, primaryUuid);
-                            using (var reader = cmd.ExecuteReader())
-                            {
-                                while (reader.Read())
-                                {
-                                    duplicateUuids.Add(new AssetMetadataRecord
+                                    missingLinks.Add(new AssetMetadataRecord
                                     {
-                                        UUID = reader.GetString(0),
-                                        Type = (sbyte)reader.GetInt32(1),
-                                        Name = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                                        Created = reader.GetInt64(3)
+                                        UUID = uuid,
+                                        Hash = hash,
+                                        Type = type,
+                                        Name = name,
+                                        Created = created
                                     });
                                 }
                             }
                         }
                     }
+                }
 
-                    foreach (var dup in duplicateUuids)
+                m_log.Info(string.Format("[AAS Migration]: Identified {0} duplicate links missing physically from pack files.", missingLinks.Count));
+
+                int migratedLinksCount = 0;
+                foreach (var link in missingLinks)
+                {
+                    if (m_Disposed) return;
+
+                    m_log.Info(string.Format("[AAS Migration]: Securing missing duplicate link in pack files for UUID {0} (Hash: {1})", link.UUID, link.Hash));
+                    WriteLinkRecordPhysically(link.UUID, link.Hash, link.Type, link.Name, link.Created);
+                    migratedLinksCount++;
+
+                    if (m_PendingDuplicateLinksCount > 0)
                     {
-                        if (m_Disposed) return;
-                        string normalizedDupUuid = NormalizeUUID(dup.UUID);
-                        if (!physicalUuids.Contains(normalizedDupUuid))
-                        {
-                            m_log.Info(string.Format("[AAS Migration]: Securing missing duplicate link in pack files for UUID {0} (Hash: {1})", dup.UUID, entry.Hash));
-                            WriteLinkRecordPhysically(dup.UUID, entry.Hash, dup.Type, dup.Name, dup.Created);
-                            physicalUuids.Add(normalizedDupUuid);
-                            migratedLinksCount++;
-                        }
-
-                        if (m_PendingDuplicateLinksCount > 0)
-                        {
-                            m_PendingDuplicateLinksCount--;
-                        }
+                        m_PendingDuplicateLinksCount--;
                     }
                 }
 
@@ -501,16 +475,12 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
 
                 m_PendingDuplicateLinksCount = 0;
-                m_log.Info(string.Format("[AAS Migration]: Migration completed. Secured {0} missing duplicate links across {1} unique hashes in the pack files.", migratedLinksCount, processedHashes));
+                m_log.Info(string.Format("[AAS Migration]: Migration completed. Secured {0} missing duplicate links.", migratedLinksCount));
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                if (m_Disposed)
-                {
-                    // Ignore exceptions if we are disposing/disposed
-                    return;
-                }
-                throw;
+                if (m_Disposed) return;
+                m_log.Error("[AAS Migration]: Migration failed: " + ex.Message);
             }
         }
 
