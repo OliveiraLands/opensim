@@ -3438,6 +3438,9 @@ namespace OpenSim.Services.AdvancedAssetService
 
             m_PackManager.ClearCommandProgress("generate-dummies");
 
+            MainConsole.Instance.Output("Waiting for background database sync write queue to complete physical commits...");
+            m_PackManager.WaitForPendingWrites();
+
             MainConsole.Instance.Output("==================================================================");
             MainConsole.Instance.Output(string.Format("DUMMY GENERATION COMPLETED! Successfully created: {0} | Errors: {1}", successCount, errorCount));
             MainConsole.Instance.Output("==================================================================");
