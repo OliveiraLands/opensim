@@ -1252,6 +1252,18 @@ namespace OpenSim.Services.AdvancedAssetService
             }
         }
 
+        public void WaitForPendingWrites()
+        {
+            FlushBatch();
+            int retries = 100; // 10 seconds max
+            while ((m_WriteQueue.Count > 0 || m_PendingWritesCache.Count > 0) && retries > 0)
+            {
+                System.Threading.Thread.Sleep(100);
+                retries--;
+            }
+            FlushBatch();
+        }
+
         public void RebuildIndex()
         {
             lock (m_Lock)

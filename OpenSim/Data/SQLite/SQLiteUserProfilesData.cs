@@ -847,15 +847,11 @@ namespace OpenSim.Data.SQLite
                         }
                         else
                         {
-                            query += "INSERT INTO userdata VALUES ( ";
-                            query += ":UserId,";
-                            query += ":TagId,";
-                            query += ":DataKey,";
-                            query += ":DataVal) ";
+                            string insertQuery = "INSERT INTO userdata VALUES ( :UserId, :TagId, :DataKey, :DataVal )";
 
                             using (SQLiteCommand put = (SQLiteCommand)m_connection.CreateCommand())
                             {
-                                cmd.CommandText = query;
+                                put.CommandText = insertQuery;
                                 put.Parameters.AddWithValue(":UserId", props.UserId.ToString());
                                 put.Parameters.AddWithValue(":TagId", props.TagId.ToString());
                                 put.Parameters.AddWithValue(":DataKey", props.DataKey.ToString());
