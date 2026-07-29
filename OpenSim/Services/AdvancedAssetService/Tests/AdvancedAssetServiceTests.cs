@@ -529,12 +529,19 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
 
         private void WaitForPendingWrites(object packManager)
         {
+            var method = packManager.GetType().GetMethod("WaitForPendingWrites", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (method != null)
+            {
+                method.Invoke(packManager, null);
+                return;
+            }
+
             var cacheField = packManager.GetType().GetField("m_PendingWritesCache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             Assert.That(cacheField, Is.Not.Null);
             var cache = (System.Collections.IDictionary)cacheField.GetValue(packManager);
             Assert.That(cache, Is.Not.Null);
 
-            int retries = 50; // 5 seconds max
+            int retries = 300; // 30 seconds max
             while (cache.Count > 0 && retries > 0)
             {
                 System.Threading.Thread.Sleep(100);

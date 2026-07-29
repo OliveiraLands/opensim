@@ -2612,5 +2612,20 @@ namespace OpenSim.Services.AdvancedAssetService
             }
             return false;
         }
+
+        public void WaitForPendingWrites()
+        {
+            while (m_WriteQueue.Count > 0 || !m_PendingWritesCache.IsEmpty)
+            {
+                System.Threading.Thread.Sleep(50);
+            }
+
+            FlushBatch();
+
+            while (!m_PendingUpdates.IsEmpty)
+            {
+                System.Threading.Thread.Sleep(50);
+            }
+        }
     }
 }
