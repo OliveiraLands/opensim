@@ -1501,11 +1501,19 @@ namespace OpenSim.Services.AdvancedAssetService
             lock (m_Lock)
             {
                 FlushBatch();
-                using (var destinationConnection = new SQLiteConnection($"Data Source={destinationPath};Version=3;"))
+                if (File.Exists(destinationPath))
+                {
+                    try { File.Delete(destinationPath); } catch { }
+                }
+
+                string connStr = string.Format("Data Source={0};Version=3;Pooling=False;", destinationPath);
+                using (var destinationConnection = new SQLiteConnection(connStr))
                 {
                     destinationConnection.Open();
                     m_Connection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
+                    destinationConnection.Close();
                 }
+                SQLiteConnection.ClearAllPools();
             }
         }
 
