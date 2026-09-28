@@ -972,6 +972,12 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
 
         private void WaitForPendingWrites(object packManager)
         {
+            if (packManager is AdvancedAssetService aas)
+            {
+                var pmField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                packManager = pmField.GetValue(aas);
+            }
+
             var method = packManager.GetType().GetMethod("WaitForPendingWrites", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             if (method != null)
             {
@@ -994,6 +1000,80 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             {
                 throw new Exception("Timeout waiting for pending writes to complete.");
             }
+        }
+
+        [Test]
+        public void TestAuditGridRepairMissingInGrid()
+        {
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+
+            AdvancedAssetService service = CreateService();
+            MockFSAssetDataPlugin.Database.Clear();
+
+            var gridField = typeof(AdvancedAssetService).GetField("m_GridConnector", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            gridField.SetValue(service, new MockFSAssetDataPlugin());
+
+            UUID assetID = UUID.Random();
+            byte[] data = new byte[] { 0x10, 0x20, 0x30, 0x40 };
+            AssetBase asset = new AssetBase(assetID, "Grid Repair Test Asset", (sbyte)AssetType.Texture, UUID.Zero.ToString());
+            asset.Data = data;
+            service.Store(asset);
+            WaitForPendingWrites(service);
+
+            // Audit only (no repair)
+            var auditMethod = typeof(AdvancedAssetService).GetMethod("HandleAuditGrid", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            auditMethod.Invoke(service, new object[] { "aas", new string[] { "aas", "audit-grid" } });
+            Assert.That(MockFSAssetDataPlugin.Database.ContainsKey(assetID.ToString()), Is.False, "Asset should not be uploaded in audit-only mode.");
+
+            // Run grid-repair
+            auditMethod.Invoke(service, new object[] { "aas", new string[] { "aas", "grid-repair" } });
+            Assert.That(MockFSAssetDataPlugin.Database.ContainsKey(assetID.ToString()), Is.True, "Asset should be uploaded to Grid in grid-repair mode.");
+            
+            var entry = MockFSAssetDataPlugin.Database[assetID.ToString()];
+            Assert.That(entry.metadata.Name, Is.EqualTo("Grid Repair Test Asset"));
+            Assert.That(entry.hash, Is.Not.Null.And.Not.Empty);
+        }
+
+        [Test]
+        public void TestAuditGridRepairHashMismatch()
+        {
+            if (Directory.Exists("test_asset_packs"))
+            {
+                try { Directory.Delete("test_asset_packs", true); } catch {}
+            }
+
+            AdvancedAssetService service = CreateService();
+            MockFSAssetDataPlugin.Database.Clear();
+
+            var gridField = typeof(AdvancedAssetService).GetField("m_GridConnector", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            gridField.SetValue(service, new MockFSAssetDataPlugin());
+
+            UUID assetID = UUID.Random();
+            byte[] data = new byte[] { 0x55, 0x66, 0x77, 0x88 };
+            AssetBase asset = new AssetBase(assetID, "Hash Mismatch Asset", (sbyte)AssetType.Texture, UUID.Zero.ToString());
+            asset.Data = data;
+            service.Store(asset);
+            WaitForPendingWrites(service);
+
+            // Pre-seed grid database with mismatched hash
+            string wrongHash = "0000000000000000000000000000000000000000000000000000000000000000";
+            AssetMetadata wrongMeta = new AssetMetadata
+            {
+                FullID = assetID,
+                ID = assetID.ToString(),
+                Name = "Old Grid Record",
+                Type = (sbyte)AssetType.Texture
+            };
+            MockFSAssetDataPlugin.Database[assetID.ToString()] = (wrongMeta, wrongHash);
+
+            var auditMethod = typeof(AdvancedAssetService).GetMethod("HandleAuditGrid", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            auditMethod.Invoke(service, new object[] { "aas", new string[] { "aas", "audit-grid", "--repair" } });
+
+            var updatedEntry = MockFSAssetDataPlugin.Database[assetID.ToString()];
+            Assert.That(updatedEntry.hash, Is.Not.EqualTo(wrongHash), "Grid hash should be updated to correct AAS hash.");
         }
     }
 

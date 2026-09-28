@@ -247,9 +247,12 @@ namespace OpenSim.Data.MySQL
                         return ExecuteNonQuery(cmd);
                     }
 
-                    //cmd.CommandText = String.Format("update {0} set hash = ?hash, access_time = UNIX_TIMESTAMP() where id = ?id", m_Table);
+                    if (oldhash != hash)
+                    {
+                        cmd.CommandText = String.Format("update {0} set hash = ?hash, type = ?type, name = ?name, description = ?description, asset_flags = ?asset_flags, access_time = UNIX_TIMESTAMP() where id = ?id", m_Table);
 
-                    //ExecuteNonQuery(cmd);
+                        return ExecuteNonQuery(cmd);
+                    }
 
                 }
 

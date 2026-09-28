@@ -69,6 +69,17 @@ Inspeciona e audita a integridade referencial e física entre os itens de invent
 * **Modo Simulação (`--dry-run`):** Executa apenas a análise diagnóstica sem alterar o estado do armazenamento.
 
 
+### `aas grid-repair [--verify-data] [--dry-run]` (ou `aas audit-grid [--repair|--fix] [--verify-data] [--dry-run]`)
+Audita e repara bidirecionalmente a integridade e consistência entre os dados do AAS (`asset_packs`) e o banco de dados central da Grid (tabela `fsassets` no MySQL/PostgreSQL):
+* **Fase 1 (AAS -> Grid Database):**
+  - **Missing in Grid:** Detecta assets locais no AAS que não constam no banco central da Grid e faz o upload dos metadados correspondentes.
+  - **Hash Mismatch:** Detecta divergências de hash SHA-256 entre o armazenamento local e o banco da Grid. Em modo de reparo, atualiza o hash no MySQL/PostgreSQL para refletir o hash real dos bytes no AAS.
+  - **Integridade Física (`--verify-data`):** Lê os bytes reais dos PackFiles. Se algum registro tiver dados zerados ou corrompidos, restaura via FallbackService ou gera dummy compatível tipado.
+* **Fase 2 (Grid Database -> AAS):**
+  - **Missing in AAS:** Detecta registros existentes no banco central da Grid que estão ausentes no repositório AAS local.
+  - Em modo de reparo, restaura os dados via serviço de contingência ou gera placeholders tipados preservando o nome original de `fsassets`, evitando erros vermelhos de carregamento na região.
+* **Modo Simulação (`--dry-run`):** Apenas relata no console as discrepâncias encontradas sem modificar bancos ou arquivos.
+
 ---
 
 ## 4. Integração com Hypergrid (HG)

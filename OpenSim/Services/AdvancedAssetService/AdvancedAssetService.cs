@@ -38,6 +38,7 @@ namespace OpenSim.Services.AdvancedAssetService
 
         protected string m_DatabaseProvider;
         protected string m_DatabaseConnectionString;
+        protected string m_Realm = "fsassets";
 
         public AdvancedAssetService(IConfigSource config) : this(config, "AssetService")
         {
@@ -60,6 +61,7 @@ namespace OpenSim.Services.AdvancedAssetService
             string dllName = assetConfig.GetString("StorageProvider", string.Empty);
             string connectionString = assetConfig.GetString("ConnectionString", string.Empty);
             string realm = assetConfig.GetString("Realm", "fsassets");
+            m_Realm = realm;
 
             m_DatabaseProvider = dllName;
             m_DatabaseConnectionString = connectionString;
@@ -124,7 +126,9 @@ namespace OpenSim.Services.AdvancedAssetService
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas defrag", "aas defrag", "Defragment PackFiles and release dead storage space", HandleDefragment);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas optimize", "aas optimize", "Optimize the SQLite index database (VACUUM and ANALYZE)", HandleOptimize);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas deep-repair", "aas deep-repair", "Deep scan PackFiles byte-by-byte and salvage active records", HandleDeepRepair);
-            MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair]", "Audit grid metadata consistency against AAS database", HandleAuditGrid);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas audit-grid", "aas audit-grid [--repair|--fix] [--verify-data] [--dry-run]", "Audit consistency between Grid and AAS assets database", HandleAuditGrid);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "aas grid-repair", "aas grid-repair [--verify-data] [--dry-run]", "Audit and repair consistency between Grid and AAS assets database", HandleAuditGrid);
+            MainConsole.Instance.Commands.AddCommand("aas", false, "grid-repair", "grid-repair [--verify-data] [--dry-run]", "Audit and repair consistency between Grid and AAS assets database", HandleAuditGrid);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas repair-links", "aas repair-links", "Repair broken links pointing to missing assets using fallback data", HandleRepairLinks);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas scan-used-assets", "aas scan-used-assets <db_mask> [<import_folder>] [--flag-suspicious]", "Scan inventories and region databases to identify used assets, importing missing ones and optionally flagging unused ones as suspicious", HandleScanUsedAssets);
             MainConsole.Instance.Commands.AddCommand("aas", false, "aas restore-from-log", "aas restore-from-log <log_path> <fs_path>", "Scan a log file for missing asset warnings and attempt to restore them from a FSAsset folder", HandleRestoreFromLog);
@@ -2292,22 +2296,83 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void HandleAuditGrid(string module, string[] args)
         {
+            Action<string> output = msg =>
+            {
+                if (MainConsole.Instance != null)
+                    MainConsole.Instance.Output(msg);
+                else
+                    m_log.Info("[ADVANCED ASSET SERVICE]: " + msg);
+            };
+
             if (m_GridConnector == null)
             {
-                MainConsole.Instance.Output("Database synchronization (Shadow Sync) is not enabled.");
+                output("Database synchronization (Shadow Sync) is not enabled.");
                 return;
             }
 
-            MainConsole.Instance.Output("Starting Grid vs AAS database audit...");
+            bool isGridRepairCommand = false;
+            if (args != null)
+            {
+                foreach (string a in args)
+                {
+                    if (a.Equals("grid-repair", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("repair-grid", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isGridRepairCommand = true;
+                        break;
+                    }
+                }
+            }
+
+            bool repair = isGridRepairCommand;
+            bool verifyData = false;
+            bool dryRun = false;
+
+            if (args != null)
+            {
+                foreach (string a in args)
+                {
+                    if (a.Equals("--repair", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("-repair", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("--fix", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("-fix", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("repair", StringComparison.OrdinalIgnoreCase) ||
+                        a.Equals("fix", StringComparison.OrdinalIgnoreCase))
+                    {
+                        repair = true;
+                    }
+                    else if (a.Equals("--verify-data", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("-verify-data", StringComparison.OrdinalIgnoreCase))
+                    {
+                        verifyData = true;
+                    }
+                    else if (a.Equals("--dry-run", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("-dry-run", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("--audit-only", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dryRun = true;
+                    }
+                }
+            }
+
+            if (dryRun)
+            {
+                repair = false;
+            }
+
+            output(string.Format("Starting Grid vs AAS database audit & repair (Mode: {0}, VerifyData: {1})...",
+                repair ? "REPAIR" : "AUDIT ONLY", verifyData ? "YES" : "NO"));
+
             var allAssets = m_PackManager.GetAllAssets();
-            
             int total = allAssets.Count;
             int missingInGrid = 0;
             int hashMismatch = 0;
             int syncedInGrid = 0;
+            int corruptedInAas = 0;
+            int repairedAasData = 0;
             int errorCount = 0;
-            bool repair = (args.Length > 2 && args[2] == "--repair");
-            string key = repair ? "repair" : "audit";
+
+            string key = repair ? (verifyData ? "repair-vdata" : "repair") : (verifyData ? "audit-vdata" : "audit");
 
             int startIndex = m_PackManager.PromptResumeProgress("audit-grid", key, total, out bool resume);
             if (!resume)
@@ -2320,63 +2385,107 @@ namespace OpenSim.Services.AdvancedAssetService
                 if (!string.IsNullOrEmpty(metadata))
                 {
                     string[] parts = metadata.Split(',');
-                    if (parts.Length == 4)
+                    if (parts.Length >= 4)
                     {
                         int.TryParse(parts[0], out missingInGrid);
                         int.TryParse(parts[1], out hashMismatch);
                         int.TryParse(parts[2], out syncedInGrid);
                         int.TryParse(parts[3], out errorCount);
+                        if (parts.Length >= 6)
+                        {
+                            int.TryParse(parts[4], out corruptedInAas);
+                            int.TryParse(parts[5], out repairedAasData);
+                        }
                     }
                 }
             }
 
-            MainConsole.Instance.Output(string.Format("Auditing {0} local assets against grid database...", total));
+            output(string.Format("Phase 1: Auditing {0} local AAS assets against Grid database...", total));
 
             for (int i = startIndex; i < total; i++)
             {
                 if (m_PackManager.CheckUserAbort())
                 {
                     m_PackManager.UpdateCommandProgress("audit-grid", i);
-                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3}", missingInGrid, hashMismatch, syncedInGrid, errorCount));
-                    MainConsole.Instance.Output("Grid audit aborted by user.");
+                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3},{4},{5}", missingInGrid, hashMismatch, syncedInGrid, errorCount, corruptedInAas, repairedAasData));
+                    output("Grid audit aborted by user.");
                     return;
                 }
                 var meta = allAssets[i];
                 if ((i + 1) % 1000 == 0 || i + 1 == total)
                 {
-                    MainConsole.Instance.Output(string.Format("Audited {0} / {1}...", i + 1, total));
+                    output(string.Format("Audited {0} / {1}...", i + 1, total));
                     m_PackManager.UpdateCommandProgress("audit-grid", i + 1);
-                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3}", missingInGrid, hashMismatch, syncedInGrid, errorCount));
+                    m_PackManager.SetConfig("cmd_state:audit-grid:metadata", string.Format("{0},{1},{2},{3},{4},{5}", missingInGrid, hashMismatch, syncedInGrid, errorCount, corruptedInAas, repairedAasData));
                 }
 
                 try
                 {
+                    if (verifyData)
+                    {
+                        sbyte dummyType;
+                        string dummyName;
+                        byte[] physicalBytes = m_PackManager.GetAssetData(meta.UUID, out dummyType, out dummyName, true);
+                        if (physicalBytes == null || physicalBytes.Length == 0)
+                        {
+                            corruptedInAas++;
+                            output(string.Format("[CORRUPTED DATA IN AAS] UUID {0} has empty or unreadable physical data in PackFiles.", meta.UUID));
+                            if (repair)
+                            {
+                                byte[] fallbackBytes = null;
+                                if (m_FallbackService != null)
+                                {
+                                    try
+                                    {
+                                        var fbAsset = m_FallbackService.Get(meta.UUID);
+                                        if (fbAsset != null && fbAsset.Data != null && fbAsset.Data.Length > 0)
+                                            fallbackBytes = fbAsset.Data;
+                                    }
+                                    catch { }
+                                }
+                                if (fallbackBytes == null)
+                                {
+                                    sbyte finalType;
+                                    string dummyFinalName;
+                                    fallbackBytes = GetDummyAssetData(meta.Type, out finalType, out dummyFinalName);
+                                }
+
+                                if (fallbackBytes != null)
+                                {
+                                    m_PackManager.StoreAssetData(meta.UUID, fallbackBytes, meta.Type, meta.Name);
+                                    repairedAasData++;
+                                    output(string.Format(" -> Repaired: Restored placeholder data for UUID {0} in AAS.", meta.UUID));
+                                }
+                            }
+                        }
+                    }
+
                     string gridHash;
                     AssetMetadata gridMeta = m_GridConnector.Get(meta.UUID, out gridHash);
 
                     if (gridMeta == null)
                     {
                         missingInGrid++;
-                        MainConsole.Instance.Output(string.Format("[MISSING IN GRID] UUID {0} is in AAS but missing in MySQL.", meta.UUID));
+                        output(string.Format("[MISSING IN GRID] UUID {0} is in AAS but missing in MySQL/Grid.", meta.UUID));
                         
                         if (repair)
                         {
                             if (SyncAssetToGrid(meta))
                             {
-                                MainConsole.Instance.Output(string.Format(" -> Repaired: Uploaded UUID {0} to MySQL.", meta.UUID));
+                                output(string.Format(" -> Repaired: Uploaded UUID {0} to Grid database.", meta.UUID));
                             }
                         }
                     }
                     else if (gridHash != meta.Hash)
                     {
                         hashMismatch++;
-                        MainConsole.Instance.Output(string.Format("[HASH MISMATCH] UUID {0} has local hash {1} but grid hash {2}.", meta.UUID, meta.Hash, gridHash));
+                        output(string.Format("[HASH MISMATCH] UUID {0} has local hash {1} but grid hash {2}.", meta.UUID, meta.Hash, gridHash));
                         
                         if (repair)
                         {
-                            if (SyncAssetToGrid(meta))
+                            if (SyncAssetToGrid(meta, true))
                             {
-                                MainConsole.Instance.Output(string.Format(" -> Repaired: Updated UUID {0} hash in MySQL.", meta.UUID));
+                                output(string.Format(" -> Repaired: Updated UUID {0} hash in Grid database.", meta.UUID));
                             }
                         }
                     }
@@ -2387,25 +2496,127 @@ namespace OpenSim.Services.AdvancedAssetService
                 }
                 catch (Exception ex)
                 {
-                    MainConsole.Instance.Output(string.Format("[ERROR] Failed to audit asset {0}: {1}", meta.UUID, ex.Message));
+                    output(string.Format("[ERROR] Failed to audit asset {0}: {1}", meta.UUID, ex.Message));
                     errorCount++;
                 }
             }
 
             m_PackManager.ClearCommandProgress("audit-grid");
 
-            MainConsole.Instance.Output("--- Audit Summary ---");
-            MainConsole.Instance.Output(string.Format("Total local assets:   {0}", total));
-            MainConsole.Instance.Output(string.Format("Synced in Grid:       {0}", syncedInGrid));
-            MainConsole.Instance.Output(string.Format("Missing in Grid:      {0}", missingInGrid));
-            MainConsole.Instance.Output(string.Format("Hash Mismatch:        {0}", hashMismatch));
+            // Phase 2: Check reverse (Grid MySQL -> AAS)
+            int missingInAas = 0;
+            int repairedInAas = 0;
+
+            if ((m_DatabaseProvider.Contains("MySQL") || m_DatabaseProvider.Contains("MySql")) && !string.IsNullOrEmpty(m_DatabaseConnectionString))
+            {
+                output("Phase 2: Auditing Grid database records against local AAS...");
+                try
+                {
+                    HashSet<string> aasSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var a in allAssets)
+                    {
+                        aasSet.Add(a.UUID.ToLower().Replace("-", ""));
+                    }
+
+                    using (MySqlConnection myConn = new MySqlConnection(m_DatabaseConnectionString))
+                    {
+                        myConn.Open();
+                        using (MySqlCommand cmd = myConn.CreateCommand())
+                        {
+                            cmd.CommandText = string.Format("SELECT id, type, name, hash FROM {0}", m_Realm);
+                            using (var reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read())
+                                {
+                                    string gridId = reader.GetString(0);
+                                    string normId = gridId.ToLower().Replace("-", "");
+
+                                    if (!aasSet.Contains(normId))
+                                    {
+                                        missingInAas++;
+                                        sbyte gridType = (sbyte)reader.GetInt32(1);
+                                        string gridName = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                                        output(string.Format("[MISSING IN AAS] UUID {0} ('{1}', Type: {2}) is registered in Grid database but missing in AAS.", gridId, gridName, (AssetType)gridType));
+
+                                        if (repair)
+                                        {
+                                            byte[] restoreData = null;
+                                            if (m_FallbackService != null)
+                                            {
+                                                try
+                                                {
+                                                    var fbAsset = m_FallbackService.Get(gridId);
+                                                    if (fbAsset != null && fbAsset.Data != null && fbAsset.Data.Length > 0)
+                                                        restoreData = fbAsset.Data;
+                                                }
+                                                catch { }
+                                            }
+
+                                            if (restoreData == null)
+                                            {
+                                                sbyte finalType;
+                                                string dummyName;
+                                                restoreData = GetDummyAssetData(gridType, out finalType, out dummyName);
+                                            }
+
+                                            if (restoreData != null)
+                                            {
+                                                string safeName = string.IsNullOrEmpty(gridName) ? "Restored Grid Asset" : gridName;
+                                                if (safeName.Length > 64) safeName = safeName.Substring(0, 64);
+
+                                                m_PackManager.StoreAssetData(gridId, restoreData, gridType, safeName);
+                                                repairedInAas++;
+                                                aasSet.Add(normId);
+                                                output(string.Format(" -> Repaired: Restored placeholder asset for UUID {0} in AAS.", gridId));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    output(string.Format("[WARNING] Could not check Grid database for reverse missing assets: {0}", ex.Message));
+                }
+            }
+
+            if (repair && (repairedAasData > 0 || repairedInAas > 0))
+            {
+                output("Waiting for AAS write queue to physically commit repaired assets...");
+                m_PackManager.WaitForPendingWrites();
+            }
+
+            output("--- Audit Summary ---");
+            output(string.Format("Mode:                 {0}", repair ? "REPAIR (Changes applied)" : "AUDIT ONLY (Inspection)"));
+            output(string.Format("Total local assets:   {0}", total));
+            output(string.Format("Synced in Grid:       {0}", syncedInGrid));
+            output(string.Format("Missing in Grid:      {0}", missingInGrid));
+            output(string.Format("Hash Mismatch:        {0}", hashMismatch));
+            if (verifyData)
+            {
+                output(string.Format("Corrupted in AAS:     {0}", corruptedInAas));
+            }
+            if (missingInAas > 0)
+            {
+                output(string.Format("Missing in AAS:       {0}", missingInAas));
+            }
             if (errorCount > 0)
             {
-                MainConsole.Instance.Output(string.Format("Audit Errors:         {0}", errorCount));
+                output(string.Format("Audit Errors:         {0}", errorCount));
             }
-            if (!repair && (missingInGrid > 0 || hashMismatch > 0))
+            if (repair)
             {
-                MainConsole.Instance.Output("Run 'aas audit-grid --repair' to automatically push missing/corrected metadata to grid database.");
+                output(string.Format("Repaired in Grid:     {0}", missingInGrid + hashMismatch));
+                if (repairedAasData > 0 || repairedInAas > 0)
+                {
+                    output(string.Format("Repaired in AAS:      {0}", repairedAasData + repairedInAas));
+                }
+            }
+            else if (missingInGrid > 0 || hashMismatch > 0 || corruptedInAas > 0 || missingInAas > 0)
+            {
+                output("Run 'aas grid-repair' or 'aas audit-grid --repair' to automatically synchronize and correct grid/asset data.");
             }
         }
 
@@ -3382,7 +3593,7 @@ namespace OpenSim.Services.AdvancedAssetService
             m_PackManager.RebuildIndex();
         }
 
-        private bool SyncAssetToGrid(AssetMetadataRecord meta)
+        private bool SyncAssetToGrid(AssetMetadataRecord meta, bool forceUpdate = false)
         {
             if (meta == null || m_GridConnector == null) return false;
             if (meta.UUID.Length > 36)
@@ -3408,6 +3619,11 @@ namespace OpenSim.Services.AdvancedAssetService
 
             try
             {
+                if (forceUpdate)
+                {
+                    try { m_GridConnector.Delete(meta.UUID); } catch { }
+                }
+
                 if (m_GridConnector.Store(am, meta.Hash))
                 {
                     m_PackManager.MarkAsSynced(meta.UUID);

@@ -2569,7 +2569,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     if (int.TryParse(processedStr, out int processed) && processed > 0 && processed < totalItems)
                     {
                         string promptMsg = "An interrupted '" + commandName + "' operation was found at " + processed + "/" + totalItems + ". Do you want to resume from where you left off?";
-                        if (OpenSim.Framework.MainConsole.Instance.Prompt(promptMsg, "yes") == "yes")
+                        if (OpenSim.Framework.MainConsole.Instance != null && OpenSim.Framework.MainConsole.Instance.Prompt(promptMsg, "yes") == "yes")
                         {
                             resume = true;
                             return processed;
