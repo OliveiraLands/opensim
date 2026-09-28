@@ -60,6 +60,15 @@ Cura referências órfãs/corrompidas no inventário dos usuários que apontam p
 * **Flag `--verify-data`:** Força o comando a abrir fisicamente e verificar o tamanho em bytes de cada asset em disco. Se houver metadados no banco mas o arquivo físico estiver corrompido ou com zero bytes, ele recria o dummy.
 * **Flag `--dry-run`:** Modo de simulação apenas de leitura. Apenas lista o que seria feito no console sem efetuar gravações físicas.
 
+### `aas verify-inventory [<user-uuid>|<first-name> <last-name>] [--verify-data] [--fix] [--dry-run] [--export <csv_path>] [--verbose]`
+Inspeciona e audita a integridade referencial e física entre os itens de inventário (`inventoryitems`) e o repositório de assets do AAS (`asset_packs`).
+* **Suporte a Alvo Específico:** Permite auditar toda a grid ou filtrar por um único usuário/avatar informando seu **UUID** (ex: `aas verify-inventory 11111111-2222-3333-4444-555555555555`) ou **Nome e Sobrenome** (ex: `aas verify-inventory John Doe`).
+* **Verificação de Dados Físicos (`--verify-data`):** Além de checar a presença do UUID no índice SQLite, lê os blocos de bytes físicos dos arquivos `.bin` dos PackFiles garantindo integridade contra blocos truncados ou de zero bytes.
+* **Auto-Reparo Imediato (`--fix` ou `--repair`):** Gera automaticamente assets de contingência (dummies) válidos e tipados (texturas, scripts, sons, roupas, objetos, etc.) preservando os nomes originais dos itens para todos os assets ausentes ou corrompidos, gravando e comitando os dados no AAS imediatamente.
+* **Exportação CSV (`--export <caminho>`):** Gera relatório detalhado em arquivo `.csv` contendo colunas: `AvatarID`, `AvatarName`, `InventoryItemID`, `ItemName`, `FolderID`, `AssetID`, `AssetType`, `Status`, `Reason` e `Fixed`.
+* **Modo Simulação (`--dry-run`):** Executa apenas a análise diagnóstica sem alterar o estado do armazenamento.
+
+
 ---
 
 ## 4. Integração com Hypergrid (HG)

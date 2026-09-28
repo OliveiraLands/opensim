@@ -1,10 +1,12 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using Nini.Config;
 using NUnit.Framework;
 using OpenMetaverse;
 using OpenSim.Framework;
+using OpenSim.Data;
 using OpenSim.Services.Interfaces;
 
 namespace OpenSim.Services.AdvancedAssetService.Tests
@@ -527,6 +529,392 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             }
         }
 
+        [Test]
+        public void TestParseInventoryVerificationArgs()
+        {
+            var service = CreateService();
+
+            // 1. Parse full args with First and Last Name
+            string[] args1 = new string[] { "aas", "verify-inventory", "John", "Doe", "--verify-data", "--fix", "--export", "report.csv", "--verbose" };
+            var options1 = service.ParseInventoryVerificationArgs(args1, 2);
+
+            Assert.That(options1.UserName, Is.EqualTo("John Doe"));
+            Assert.That(options1.VerifyData, Is.True);
+            Assert.That(options1.Fix, Is.True);
+            Assert.That(options1.ExportPath, Is.EqualTo("report.csv"));
+            Assert.That(options1.Verbose, Is.True);
+
+            // 2. Parse args with UUID
+            UUID targetId = UUID.Random();
+            string[] args2 = new string[] { "aas", "verify-inventory", targetId.ToString(), "--repair", "--dry-run" };
+            var options2 = service.ParseInventoryVerificationArgs(args2, 2);
+
+            Assert.That(options2.UserID.HasValue, Is.True);
+            Assert.That(options2.UserID.Value, Is.EqualTo(targetId));
+            Assert.That(options2.Fix, Is.False); // dry-run disables fix
+        }
+
+        [Test]
+        public void TestVerifyInventoryTargetSpecificUserByUUID()
+        {
+            string storage = "test_verify_user_uuid_packs";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                // Store one healthy asset in AAS
+                UUID healthyAssetID = UUID.Random();
+                byte[] assetData = new byte[] { 0x10, 0x20, 0x30, 0x40 };
+                AssetBase asset = new AssetBase(healthyAssetID, "Healthy Texture", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = assetData };
+                service.Store(asset);
+
+                var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var packManager = packManagerField.GetValue(service);
+                WaitForPendingWrites(packManager);
+
+                UUID user1 = UUID.Random();
+                UUID user2 = UUID.Random();
+                UUID missingAssetID1 = UUID.Random();
+                UUID missingAssetID2 = UUID.Random();
+
+                var mockInventory = new MockInventoryData();
+                // User 1 items: 1 healthy, 1 missing
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user1,
+                    assetID = healthyAssetID,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = "User1 Healthy Texture"
+                });
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user1,
+                    assetID = missingAssetID1,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = "User1 Missing Texture"
+                });
+                // User 2 items: 1 missing (should NOT be scanned when user1 is targeted)
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user2,
+                    assetID = missingAssetID2,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = "User2 Missing Texture"
+                });
+
+                var options = new InventoryVerificationOptions
+                {
+                    UserID = user1,
+                    InventoryDatabase = mockInventory,
+                    VerifyData = false
+                };
+
+                List<string> logs = new List<string>();
+                var result = service.VerifyInventory(options, msg => logs.Add(msg));
+
+                Assert.That(result.TotalScanned, Is.EqualTo(2), "Should only scan User 1 items.");
+                Assert.That(result.UniqueAssetsCount, Is.EqualTo(2));
+                Assert.That(result.HealthyAssetsCount, Is.EqualTo(1));
+                Assert.That(result.MissingAssetsCount, Is.EqualTo(1));
+                Assert.That(result.Issues.Count, Is.EqualTo(1));
+                Assert.That(result.Issues[0].AssetID, Is.EqualTo(missingAssetID1));
+                Assert.That(result.Issues[0].AvatarID, Is.EqualTo(user1));
+            }
+
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
+        [Test]
+        public void TestVerifyInventoryTargetSpecificUserByName()
+        {
+            string storage = "test_verify_user_name_packs";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID userJane = UUID.Random();
+                UUID missingAssetID = UUID.Random();
+
+                var mockAccounts = new MockUserAccountData();
+                mockAccounts.Accounts.Add(new UserAccountData
+                {
+                    PrincipalID = userJane,
+                    FirstName = "Jane",
+                    LastName = "Doe"
+                });
+
+                var mockInventory = new MockInventoryData();
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = userJane,
+                    assetID = missingAssetID,
+                    assetType = (int)AssetType.LSLText,
+                    inventoryName = "Jane Broken Script"
+                });
+
+                var options = new InventoryVerificationOptions
+                {
+                    UserName = "Jane Doe",
+                    AccountDatabase = mockAccounts,
+                    InventoryDatabase = mockInventory,
+                    VerifyData = false
+                };
+
+                List<string> logs = new List<string>();
+                var result = service.VerifyInventory(options, msg => logs.Add(msg));
+
+                Assert.That(options.UserID.HasValue, Is.True);
+                Assert.That(options.UserID.Value, Is.EqualTo(userJane));
+                Assert.That(result.TotalScanned, Is.EqualTo(1));
+                Assert.That(result.MissingAssetsCount, Is.EqualTo(1));
+                Assert.That(result.Issues.Count, Is.EqualTo(1));
+                Assert.That(result.Issues[0].ItemName, Is.EqualTo("Jane Broken Script"));
+            }
+
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
+        [Test]
+        public void TestVerifyInventoryVerifyDataDetectsCorrupted()
+        {
+            string storage = "test_verify_corrupted_packs";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID assetID = UUID.Random();
+                // Store asset with 1 byte initially
+                service.Store(new AssetBase(assetID, "Corrupt Candidate", (sbyte)AssetType.Texture, UUID.Zero.ToString()) { Data = new byte[] { 0x01 } });
+
+                var packManagerField = typeof(AdvancedAssetService).GetField("m_PackManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var packManager = packManagerField.GetValue(service);
+                WaitForPendingWrites(packManager);
+
+                // Overwrite pack file magic number with zeros to simulate corrupted physical storage
+                foreach (var file in Directory.GetFiles(storage, "pack_*.bin"))
+                {
+                    using (var fs = new FileStream(file, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+                    {
+                        fs.Write(new byte[32], 0, 32);
+                    }
+                }
+
+                UUID user = UUID.Random();
+                var mockInventory = new MockInventoryData();
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user,
+                    assetID = assetID,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = "Empty Texture Asset Item"
+                });
+
+                // 1. Without --verify-data: passes because UUID is in asset_map index
+                var options1 = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    InventoryDatabase = mockInventory,
+                    VerifyData = false
+                };
+                var result1 = service.VerifyInventory(options1);
+                Assert.That(result1.HealthyAssetsCount, Is.EqualTo(1));
+                Assert.That(result1.CorruptedAssetsCount, Is.EqualTo(0));
+
+                // 2. With --verify-data: reads physical data, detects 0 bytes / empty
+                var options2 = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    InventoryDatabase = mockInventory,
+                    VerifyData = true
+                };
+                var result2 = service.VerifyInventory(options2);
+                Assert.That(result2.CorruptedAssetsCount, Is.EqualTo(1));
+                Assert.That(result2.Issues.Count, Is.EqualTo(1));
+                Assert.That(result2.Issues[0].Status, Is.EqualTo("Corrupted"));
+            }
+
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
+        [Test]
+        public void TestVerifyInventoryFixRepairsMissingAssets()
+        {
+            string storage = "test_verify_fix_packs";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID user = UUID.Random();
+                UUID missingTexture = UUID.Random();
+                UUID missingScript = UUID.Random();
+
+                var mockInventory = new MockInventoryData();
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user,
+                    assetID = missingTexture,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = "My Broken Texture"
+                });
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user,
+                    assetID = missingScript,
+                    assetType = (int)AssetType.LSLText,
+                    inventoryName = "My Broken Script"
+                });
+
+                // 1. Run with Fix = true
+                var options = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    InventoryDatabase = mockInventory,
+                    Fix = true
+                };
+
+                List<string> logs = new List<string>();
+                var result = service.VerifyInventory(options, msg => logs.Add(msg));
+
+                Assert.That(result.MissingAssetsCount, Is.EqualTo(2));
+                Assert.That(result.FixedAssetsCount, Is.EqualTo(2));
+                Assert.That(result.Issues.All(i => i.Fixed), Is.True);
+
+                // 2. Verify that assets now exist and are readable in AAS!
+                AssetBase restoredTex = service.Get(missingTexture.ToString());
+                Assert.That(restoredTex, Is.Not.Null);
+                Assert.That(restoredTex.Type, Is.EqualTo((sbyte)AssetType.Texture));
+                Assert.That(restoredTex.Data, Is.Not.Null);
+                Assert.That(restoredTex.Data.Length, Is.GreaterThan(0));
+
+                AssetBase restoredScript = service.Get(missingScript.ToString());
+                Assert.That(restoredScript, Is.Not.Null);
+                Assert.That(restoredScript.Type, Is.EqualTo((sbyte)AssetType.LSLText));
+                Assert.That(restoredScript.Data, Is.Not.Null);
+                Assert.That(System.Text.Encoding.UTF8.GetString(restoredScript.Data), Contains.Substring("default"));
+
+                // 3. Re-run Verify: should now be 100% healthy
+                var verifyAgainOptions = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    InventoryDatabase = mockInventory,
+                    VerifyData = true
+                };
+                var resultAgain = service.VerifyInventory(verifyAgainOptions);
+                Assert.That(resultAgain.MissingAssetsCount, Is.EqualTo(0));
+                Assert.That(resultAgain.HealthyAssetsCount, Is.EqualTo(2));
+            }
+
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
+        [Test]
+        public void TestVerifyInventoryExportCsv()
+        {
+            string storage = "test_verify_export_packs";
+            string csvFile = "test_inventory_report.csv";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+            if (File.Exists(csvFile))
+            {
+                try { File.Delete(csvFile); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID user = UUID.Random();
+                UUID missingAsset = UUID.Random();
+
+                var mockInventory = new MockInventoryData();
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user,
+                    assetID = missingAsset,
+                    assetType = (int)AssetType.Sound,
+                    inventoryName = "Special Sound Clip"
+                });
+
+                var options = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    UserName = "Test Avatar",
+                    InventoryDatabase = mockInventory,
+                    ExportPath = csvFile
+                };
+
+                var result = service.VerifyInventory(options);
+                Assert.That(File.Exists(csvFile), Is.True, "CSV report file should be created.");
+
+                string[] lines = File.ReadAllLines(csvFile);
+                Assert.That(lines.Length, Is.GreaterThanOrEqualTo(2));
+                Assert.That(lines[0], Contains.Substring("AvatarID,AvatarName,InventoryItemID"));
+                Assert.That(lines[1], Contains.Substring("Special Sound Clip"));
+                Assert.That(lines[1], Contains.Substring("Sound"));
+            }
+
+            if (File.Exists(csvFile))
+            {
+                try { File.Delete(csvFile); } catch { }
+            }
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
         private void WaitForPendingWrites(object packManager)
         {
             var method = packManager.GetType().GetMethod("WaitForPendingWrites", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
@@ -552,5 +940,112 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
                 throw new Exception("Timeout waiting for pending writes to complete.");
             }
         }
+    }
+
+    public class MockInventoryData : IXInventoryData
+    {
+        public List<XInventoryItem> Items = new List<XInventoryItem>();
+        public List<XInventoryFolder> Folders = new List<XInventoryFolder>();
+
+        public XInventoryFolder[] GetFolder(string field, string val) => Folders.ToArray();
+        public XInventoryFolder[] GetFolders(string[] fields, string[] vals) => Folders.ToArray();
+
+        public XInventoryItem[] GetItems(string[] fields, string[] vals)
+        {
+            if (fields == null || fields.Length == 0)
+                return Items.ToArray();
+
+            var result = new List<XInventoryItem>();
+            foreach (var item in Items)
+            {
+                bool match = true;
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    if (fields[i].Equals("avatarID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!item.avatarID.ToString().Equals(vals[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+                if (match)
+                    result.Add(item);
+            }
+            return result.ToArray();
+        }
+
+        public bool StoreFolder(XInventoryFolder folder) { Folders.Add(folder); return true; }
+        public bool StoreItem(XInventoryItem item) { Items.Add(item); return true; }
+        public bool DeleteFolders(string field, string val) => true;
+        public bool DeleteFolders(string[] fields, string[] vals) => true;
+        public bool DeleteItems(string field, string val) => true;
+        public bool DeleteItems(string[] fields, string[] vals) => true;
+        public bool MoveItem(string id, string newParent) => true;
+        public bool MoveFolder(string id, string newParent) => true;
+        public XInventoryItem[] GetActiveGestures(UUID principalID) => new XInventoryItem[0];
+        public int GetAssetPermissions(UUID principalID, UUID assetID) => 0;
+    }
+
+    public class MockUserAccountData : IUserAccountData
+    {
+        public List<UserAccountData> Accounts = new List<UserAccountData>();
+
+        public UserAccountData[] Get(string[] fields, string[] values)
+        {
+            var result = new List<UserAccountData>();
+            foreach (var acc in Accounts)
+            {
+                bool match = true;
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    if (fields[i].Equals("PrincipalID", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!acc.PrincipalID.ToString().Equals(values[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = false; break;
+                        }
+                    }
+                    else if (fields[i].Equals("FirstName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!acc.FirstName.Equals(values[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = false; break;
+                        }
+                    }
+                    else if (fields[i].Equals("LastName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!acc.LastName.Equals(values[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = false; break;
+                        }
+                    }
+                }
+                if (match)
+                    result.Add(acc);
+            }
+            return result.ToArray();
+        }
+
+        public bool Store(UserAccountData data) { Accounts.Add(data); return true; }
+        public bool Delete(string field, string val) => true;
+
+        public UserAccountData[] GetUsers(UUID scopeID, string query)
+        {
+            var result = new List<UserAccountData>();
+            string lower = query.ToLower();
+            foreach (var acc in Accounts)
+            {
+                string fullName = (acc.FirstName + " " + acc.LastName).ToLower();
+                if (fullName.Contains(lower) || acc.FirstName.ToLower().Contains(lower) || acc.LastName.ToLower().Contains(lower))
+                {
+                    result.Add(acc);
+                }
+            }
+            return result.ToArray();
+        }
+
+        public UserAccountData[] GetUsersWhere(UUID scopeID, string where) => Accounts.ToArray();
     }
 }
