@@ -915,6 +915,61 @@ namespace OpenSim.Services.AdvancedAssetService.Tests
             }
         }
 
+        [Test]
+        public void TestVerifyInventoryFixWithLongName()
+        {
+            string storage = "test_verify_longname_packs";
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+
+            IConfigSource config = new IniConfigSource();
+            config.AddConfig("AssetService");
+            config.Configs["AssetService"].Set("StoragePath", storage);
+
+            using (AdvancedAssetService service = new AdvancedAssetService(config))
+            {
+                UUID user = UUID.Random();
+                UUID missingAsset = UUID.Random();
+
+                string excessivelyLongName = new string('X', 120);
+
+                var mockInventory = new MockInventoryData();
+                mockInventory.Items.Add(new XInventoryItem
+                {
+                    inventoryID = UUID.Random(),
+                    avatarID = user,
+                    assetID = missingAsset,
+                    assetType = (int)AssetType.Texture,
+                    inventoryName = excessivelyLongName
+                });
+
+                var options = new InventoryVerificationOptions
+                {
+                    UserID = user,
+                    InventoryDatabase = mockInventory,
+                    Fix = true
+                };
+
+                List<string> logs = new List<string>();
+                var result = service.VerifyInventory(options, msg => logs.Add(msg));
+
+                Assert.That(result.MissingAssetsCount, Is.EqualTo(1));
+                Assert.That(result.FixedAssetsCount, Is.EqualTo(1));
+                Assert.That(result.FixErrorsCount, Is.EqualTo(0));
+
+                AssetBase restoredTex = service.Get(missingAsset.ToString());
+                Assert.That(restoredTex, Is.Not.Null);
+                Assert.That(restoredTex.Name.Length, Is.LessThanOrEqualTo(64), "Asset name must be <= 64 chars for MySQL fsassets schema compatibility.");
+            }
+
+            if (Directory.Exists(storage))
+            {
+                try { Directory.Delete(storage, true); } catch { }
+            }
+        }
+
         private void WaitForPendingWrites(object packManager)
         {
             var method = packManager.GetType().GetMethod("WaitForPendingWrites", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);

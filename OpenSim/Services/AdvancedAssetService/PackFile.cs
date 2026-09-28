@@ -901,12 +901,15 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             if (data == null) return null;
             string nid = NormalizeUUID(uuid);
+            string safeName = name;
+            if (safeName != null && safeName.Length > 64)
+                safeName = safeName.Substring(0, 64);
 
             var op = new AssetWriteOp { 
                 UUID = uuid, 
                 Data = data, 
                 Type = type, 
-                Name = name, 
+                Name = safeName, 
                 Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Tcs = new TaskCompletionSource<string>() 
             };

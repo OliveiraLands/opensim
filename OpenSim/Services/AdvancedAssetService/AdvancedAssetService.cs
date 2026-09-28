@@ -2361,17 +2361,8 @@ namespace OpenSim.Services.AdvancedAssetService
                         
                         if (repair)
                         {
-                            AssetMetadata am = new AssetMetadata
+                            if (SyncAssetToGrid(meta))
                             {
-                                FullID = new UUID(meta.UUID),
-                                ID = meta.UUID,
-                                Type = meta.Type,
-                                Name = meta.Name,
-                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
-                            };
-                            if (m_GridConnector.Store(am, meta.Hash))
-                            {
-                                m_PackManager.MarkAsSynced(meta.UUID);
                                 MainConsole.Instance.Output(string.Format(" -> Repaired: Uploaded UUID {0} to MySQL.", meta.UUID));
                             }
                         }
@@ -2383,17 +2374,8 @@ namespace OpenSim.Services.AdvancedAssetService
                         
                         if (repair)
                         {
-                            AssetMetadata am = new AssetMetadata
+                            if (SyncAssetToGrid(meta))
                             {
-                                FullID = new UUID(meta.UUID),
-                                ID = meta.UUID,
-                                Type = meta.Type,
-                                Name = meta.Name,
-                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
-                            };
-                            if (m_GridConnector.Store(am, meta.Hash))
-                            {
-                                m_PackManager.MarkAsSynced(meta.UUID);
                                 MainConsole.Instance.Output(string.Format(" -> Repaired: Updated UUID {0} hash in MySQL.", meta.UUID));
                             }
                         }
@@ -2574,34 +2556,9 @@ namespace OpenSim.Services.AdvancedAssetService
                     int count = 0;
                     foreach (var meta in unsynced)
                     {
-                        if (meta.UUID.Length > 36)
+                        if (SyncAssetToGrid(meta))
                         {
-                            m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
-                            m_PackManager.MarkAsSynced(meta.UUID);
                             count++;
-                            continue;
-                        }
-
-                        AssetMetadata am = new AssetMetadata
-                        {
-                            FullID = new UUID(meta.UUID),
-                            ID = meta.UUID,
-                            Type = meta.Type,
-                            Name = meta.Name,
-                            CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
-                        };
-
-                        try
-                        {
-                            if (m_GridConnector.Store(am, meta.Hash))
-                            {
-                                m_PackManager.MarkAsSynced(meta.UUID);
-                                count++;
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            m_log.Error("[ADVANCED ASSET SERVICE]: Error syncing asset: " + ex.Message);
                         }
                     }
 
@@ -3220,6 +3177,8 @@ namespace OpenSim.Services.AdvancedAssetService
                         string finalName = !string.IsNullOrEmpty(issue.ItemName)
                             ? string.Format("Dummy Placeholder for '{0}' (Restored)", issue.ItemName)
                             : dummyDefaultName;
+                        if (finalName.Length > 64)
+                            finalName = finalName.Substring(0, 64);
 
                         m_PackManager.StoreAssetData(issue.AssetID.ToString(), dummyData, finalType, finalName);
                         fixedAssetIDs.Add(issue.AssetID);
@@ -3423,6 +3382,46 @@ namespace OpenSim.Services.AdvancedAssetService
             m_PackManager.RebuildIndex();
         }
 
+        private bool SyncAssetToGrid(AssetMetadataRecord meta)
+        {
+            if (meta == null || m_GridConnector == null) return false;
+            if (meta.UUID.Length > 36)
+            {
+                m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
+                m_PackManager.MarkAsSynced(meta.UUID);
+                return true;
+            }
+
+            string safeName = meta.Name ?? string.Empty;
+            if (safeName.Length > 64)
+                safeName = safeName.Substring(0, 64);
+
+            AssetMetadata am = new AssetMetadata
+            {
+                FullID = new UUID(meta.UUID),
+                ID = meta.UUID,
+                Type = meta.Type,
+                Name = safeName,
+                Description = string.Empty,
+                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
+            };
+
+            try
+            {
+                if (m_GridConnector.Store(am, meta.Hash))
+                {
+                    m_PackManager.MarkAsSynced(meta.UUID);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Failed to sync asset {0} to grid database: {1}. Marking as synced to prevent error loop.", meta.UUID, ex.Message);
+                m_PackManager.MarkAsSynced(meta.UUID);
+            }
+            return false;
+        }
+
         private void ProcessShadowSync()
         {
             if (m_IsSyncing || m_GridConnector == null) return;
@@ -3430,64 +3429,21 @@ namespace OpenSim.Services.AdvancedAssetService
 
             try
             {
-                if (m_log.IsDebugEnabled)
+                var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
+                if (unsynced.Count > 0)
                 {
-                    var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
-                    if (unsynced.Count > 0)
-                    {
+                    if (m_log.IsDebugEnabled)
                         m_log.DebugFormat("[ADVANCED ASSET SERVICE]: Syncing {0} assets to grid database...", unsynced.Count);
-                        int count = 0;
-                        foreach (var meta in unsynced)
-                        {
-                            if (meta.UUID.Length > 36)
-                            {
-                                m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
-                                m_PackManager.MarkAsSynced(meta.UUID);
-                                count++;
-                                continue;
-                            }
 
-                            AssetMetadata am = new AssetMetadata
-                            {
-                                FullID = new UUID(meta.UUID),
-                                ID = meta.UUID,
-                                Type = meta.Type,
-                                Name = meta.Name,
-                                CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
-                            };
-
-                            if (m_GridConnector.Store(am, meta.Hash))
-                            {
-                                m_PackManager.MarkAsSynced(meta.UUID);
-                                count++;
-                            }
-                        }
-                        if (count > 0) m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Shadow Sync: {0} assets synchronized.", count);
-                    }
-                }
-                else
-                {
-                    var unsynced = m_PackManager.GetUnsyncedAssets(m_ShadowSyncBatchSize);
+                    int count = 0;
                     foreach (var meta in unsynced)
                     {
-                        if (meta.UUID.Length > 36)
-                        {
-                            m_log.WarnFormat("[ADVANCED ASSET SERVICE]: Asset UUID '{0}' is too long ({1} chars) for grid database. Marking as synced to prevent error loop.", meta.UUID, meta.UUID.Length);
-                            m_PackManager.MarkAsSynced(meta.UUID);
-                            continue;
-                        }
-
-                        AssetMetadata am = new AssetMetadata
-                        {
-                            FullID = new UUID(meta.UUID),
-                            ID = meta.UUID,
-                            Type = meta.Type,
-                            Name = meta.Name,
-                            CreationDate = DateTimeOffset.FromUnixTimeSeconds(meta.Created).LocalDateTime
-                        };
-                        if (m_GridConnector.Store(am, meta.Hash))
-                            m_PackManager.MarkAsSynced(meta.UUID);
+                        if (SyncAssetToGrid(meta))
+                            count++;
                     }
+
+                    if (count > 0 && m_log.IsDebugEnabled)
+                        m_log.InfoFormat("[ADVANCED ASSET SERVICE]: Shadow Sync: {0} assets synchronized.", count);
                 }
             }
             catch (Exception ex)
@@ -3820,6 +3776,8 @@ namespace OpenSim.Services.AdvancedAssetService
 
                     // Override final name with a combination of the user's item name
                     finalName = string.Format("Dummy Placeholder for '{0}' (Missing)", item.inventoryName);
+                    if (finalName.Length > 64)
+                        finalName = finalName.Substring(0, 64);
 
                     m_PackManager.StoreAssetData(missingUuid.ToString(), dummyData, finalType, finalName);
                     successCount++;
