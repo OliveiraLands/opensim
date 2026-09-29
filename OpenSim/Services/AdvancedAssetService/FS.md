@@ -60,6 +60,26 @@ Cura referências órfãs/corrompidas no inventário dos usuários que apontam p
 * **Flag `--verify-data`:** Força o comando a abrir fisicamente e verificar o tamanho em bytes de cada asset em disco. Se houver metadados no banco mas o arquivo físico estiver corrompido ou com zero bytes, ele recria o dummy.
 * **Flag `--dry-run`:** Modo de simulação apenas de leitura. Apenas lista o que seria feito no console sem efetuar gravações físicas.
 
+### `aas verify-inventory [<user-uuid>|<first-name> <last-name>] [--verify-data] [--fix] [--dry-run] [--export <csv_path>] [--verbose]`
+Inspeciona e audita a integridade referencial e física entre os itens de inventário (`inventoryitems`) e o repositório de assets do AAS (`asset_packs`).
+* **Suporte a Alvo Específico:** Permite auditar toda a grid ou filtrar por um único usuário/avatar informando seu **UUID** (ex: `aas verify-inventory 11111111-2222-3333-4444-555555555555`) ou **Nome e Sobrenome** (ex: `aas verify-inventory John Doe`).
+* **Verificação de Dados Físicos (`--verify-data`):** Além de checar a presença do UUID no índice SQLite, lê os blocos de bytes físicos dos arquivos `.bin` dos PackFiles garantindo integridade contra blocos truncados ou de zero bytes.
+* **Auto-Reparo Imediato (`--fix` ou `--repair`):** Gera automaticamente assets de contingência (dummies) válidos e tipados (texturas, scripts, sons, roupas, objetos, etc.) preservando os nomes originais dos itens para todos os assets ausentes ou corrompidos, gravando e comitando os dados no AAS imediatamente.
+* **Exportação CSV (`--export <caminho>`):** Gera relatório detalhado em arquivo `.csv` contendo colunas: `AvatarID`, `AvatarName`, `InventoryItemID`, `ItemName`, `FolderID`, `AssetID`, `AssetType`, `Status`, `Reason` e `Fixed`.
+* **Modo Simulação (`--dry-run`):** Executa apenas a análise diagnóstica sem alterar o estado do armazenamento.
+
+
+### `aas grid-repair [--verify-data] [--dry-run]` (ou `aas audit-grid [--repair|--fix] [--verify-data] [--dry-run]`)
+Audita e repara bidirecionalmente a integridade e consistência entre os dados do AAS (`asset_packs`) e o banco de dados central da Grid (tabela `fsassets` no MySQL/PostgreSQL):
+* **Fase 1 (AAS -> Grid Database):**
+  - **Missing in Grid:** Detecta assets locais no AAS que não constam no banco central da Grid e faz o upload dos metadados correspondentes.
+  - **Hash Mismatch:** Detecta divergências de hash SHA-256 entre o armazenamento local e o banco da Grid. Em modo de reparo, atualiza o hash no MySQL/PostgreSQL para refletir o hash real dos bytes no AAS.
+  - **Integridade Física (`--verify-data`):** Lê os bytes reais dos PackFiles. Se algum registro tiver dados zerados ou corrompidos, restaura via FallbackService ou gera dummy compatível tipado.
+* **Fase 2 (Grid Database -> AAS):**
+  - **Missing in AAS:** Detecta registros existentes no banco central da Grid que estão ausentes no repositório AAS local.
+  - Em modo de reparo, restaura os dados via serviço de contingência ou gera placeholders tipados preservando o nome original de `fsassets`, evitando erros vermelhos de carregamento na região.
+* **Modo Simulação (`--dry-run`):** Apenas relata no console as discrepâncias encontradas sem modificar bancos ou arquivos.
+
 ---
 
 ## 4. Integração com Hypergrid (HG)

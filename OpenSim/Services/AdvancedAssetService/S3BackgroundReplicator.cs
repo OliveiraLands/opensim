@@ -6,6 +6,7 @@ using log4net;
 using Nini.Config;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.S3.Transfer;
 using OpenSim.Framework;
 
 namespace OpenSim.Services.AdvancedAssetService
@@ -198,16 +199,15 @@ namespace OpenSim.Services.AdvancedAssetService
 
         private void UploadFile(string localPath, string s3Key)
         {
-            using (FileStream fs = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            var fileTransferUtility = new TransferUtility(m_s3Client);
+            var uploadRequest = new TransferUtilityUploadRequest
             {
-                PutObjectRequest request = new PutObjectRequest
-                {
-                    BucketName = m_bucketName,
-                    Key = s3Key,
-                    InputStream = fs
-                };
-                m_s3Client.PutObjectAsync(request).Wait();
-            }
+                BucketName = m_bucketName,
+                Key = s3Key,
+                FilePath = localPath,
+                DisablePayloadSigning = true
+            };
+            fileTransferUtility.UploadAsync(uploadRequest).Wait();
         }
 
         private bool FileExistsInS3(string s3Key, long expectedSize)

@@ -164,6 +164,11 @@ namespace OpenSim.Data.PGSQL
                    query = String.Format("insert into {0} (\"id\", \"type\", \"hash\", \"asset_flags\", \"create_time\", \"access_time\") values ( :id, :type, :hash, :asset_flags, :create_time, :access_time)", m_Table);
                    found = true;
                 }
+                else if (oldhash != hash)
+                {
+                   query = String.Format("UPDATE {0} SET \"hash\" = :hash, \"type\" = :type, \"asset_flags\" = :asset_flags, \"access_time\" = :access_time WHERE \"id\" = :id", m_Table);
+                   found = true;
+                }
 
                 using (NpgsqlConnection dbcon = new NpgsqlConnection(m_connectionString))
                 using (NpgsqlCommand cmd = new NpgsqlCommand(query, dbcon))

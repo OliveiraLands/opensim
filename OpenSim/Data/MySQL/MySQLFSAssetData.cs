@@ -224,9 +224,17 @@ namespace OpenSim.Data.MySQL
 
                 using (MySqlCommand cmd = new MySqlCommand())
                 {
+                    string safeName = meta.Name ?? string.Empty;
+                    if (safeName.Length > 64)
+                        safeName = safeName.Substring(0, 64);
+
+                    string safeDesc = meta.Description ?? string.Empty;
+                    if (safeDesc.Length > 64)
+                        safeDesc = safeDesc.Substring(0, 64);
+
                     cmd.Parameters.AddWithValue("?id", meta.ID);
-                    cmd.Parameters.AddWithValue("?name", meta.Name);
-                    cmd.Parameters.AddWithValue("?description", meta.Description);
+                    cmd.Parameters.AddWithValue("?name", safeName);
+                    cmd.Parameters.AddWithValue("?description", safeDesc);
 //                    cmd.Parameters.AddWithValue("?type", meta.Type.ToString());
                     cmd.Parameters.AddWithValue("?type", meta.Type);
                     cmd.Parameters.AddWithValue("?hash", hash);
@@ -236,14 +244,15 @@ namespace OpenSim.Data.MySQL
                     {
                         cmd.CommandText = String.Format("insert into {0} (id, name, description, type, hash, asset_flags, create_time, access_time) values ( ?id, ?name, ?description, ?type, ?hash, ?asset_flags, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())", m_Table);
 
-                        ExecuteNonQuery(cmd);
-
-                        return true;
+                        return ExecuteNonQuery(cmd);
                     }
 
-                    //cmd.CommandText = String.Format("update {0} set hash = ?hash, access_time = UNIX_TIMESTAMP() where id = ?id", m_Table);
+                    if (oldhash != hash)
+                    {
+                        cmd.CommandText = String.Format("update {0} set hash = ?hash, type = ?type, name = ?name, description = ?description, asset_flags = ?asset_flags, access_time = UNIX_TIMESTAMP() where id = ?id", m_Table);
 
-                    //ExecuteNonQuery(cmd);
+                        return ExecuteNonQuery(cmd);
+                    }
 
                 }
 

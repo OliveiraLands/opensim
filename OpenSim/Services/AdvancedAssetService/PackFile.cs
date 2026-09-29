@@ -901,12 +901,15 @@ namespace OpenSim.Services.AdvancedAssetService
         {
             if (data == null) return null;
             string nid = NormalizeUUID(uuid);
+            string safeName = name;
+            if (safeName != null && safeName.Length > 64)
+                safeName = safeName.Substring(0, 64);
 
             var op = new AssetWriteOp { 
                 UUID = uuid, 
                 Data = data, 
                 Type = type, 
-                Name = name, 
+                Name = safeName, 
                 Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Tcs = new TaskCompletionSource<string>() 
             };
@@ -1254,14 +1257,20 @@ namespace OpenSim.Services.AdvancedAssetService
 
         public void WaitForPendingWrites()
         {
-            FlushBatch();
             int retries = 100; // 10 seconds max
-            while ((m_WriteQueue.Count > 0 || m_PendingWritesCache.Count > 0) && retries > 0)
+            while ((m_WriteQueue.Count > 0 || !m_PendingWritesCache.IsEmpty) && retries > 0)
             {
-                System.Threading.Thread.Sleep(100);
+                System.Threading.Thread.Sleep(50);
                 retries--;
             }
+
             FlushBatch();
+
+            while (!m_PendingUpdates.IsEmpty && retries > 0)
+            {
+                System.Threading.Thread.Sleep(50);
+                retries--;
+            }
         }
 
         public void RebuildIndex()
@@ -1510,11 +1519,19 @@ namespace OpenSim.Services.AdvancedAssetService
             lock (m_Lock)
             {
                 FlushBatch();
-                using (var destinationConnection = new SQLiteConnection($"Data Source={destinationPath};Version=3;"))
+                if (File.Exists(destinationPath))
+                {
+                    try { File.Delete(destinationPath); } catch { }
+                }
+
+                string connStr = string.Format("Data Source={0};Version=3;Pooling=False;", destinationPath);
+                using (var destinationConnection = new SQLiteConnection(connStr))
                 {
                     destinationConnection.Open();
                     m_Connection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
+                    destinationConnection.Close();
                 }
+                SQLiteConnection.ClearAllPools();
             }
         }
 
@@ -2570,7 +2587,7 @@ namespace OpenSim.Services.AdvancedAssetService
                     if (int.TryParse(processedStr, out int processed) && processed > 0 && processed < totalItems)
                     {
                         string promptMsg = "An interrupted '" + commandName + "' operation was found at " + processed + "/" + totalItems + ". Do you want to resume from where you left off?";
-                        if (OpenSim.Framework.MainConsole.Instance.Prompt(promptMsg, "yes") == "yes")
+                        if (OpenSim.Framework.MainConsole.Instance != null && OpenSim.Framework.MainConsole.Instance.Prompt(promptMsg, "yes") == "yes")
                         {
                             resume = true;
                             return processed;
